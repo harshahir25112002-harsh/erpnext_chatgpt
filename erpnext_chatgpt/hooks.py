@@ -6,24 +6,13 @@ app_email = "support@example.com"
 app_license = "MIT"
 app_version = "1.0.0"
 
-# Includes in Desk
-# ------------------
-# Include js and css files globally in desk.html
-app_include_js = [
-    "/assets/erpnext_chatgpt/js/chatgpt_widget.js",
-    "/assets/erpnext_chatgpt/js/chatgpt_doctype_actions.js"
-]
-app_include_css = [
-    "/assets/erpnext_chatgpt/css/chatgpt_widget.css"
-]
-
-# Home Pages
-# ----------
-# application home page (will override Website Settings)
-# home_page = "login"
-
-# Installation
-# ------------
-# before_install = "erpnext_chatgpt.install.before_install"
-# after_install = "erpnext_chatgpt.install.after_install"
-
+# Note: Disabled global desk inclusion to protect core Desk from any client-side conflicts.
+# The AI Copilot is safely accessible through the dedicated full-page /app/chatgpt_copilot
+# and can be enabled per-doctype via Client Scripts.
+# app_include_js = [
+#     "/assets/erpnext_chatgpt/js/chatgpt_widget.js",
+#     "/assets/erpnext_chatgpt/js/chatgpt_doctype_actions.js"
+# ]
+# app_include_css = [
+#     "/assets/erpnext_chatgpt/css/chatgpt_widget.css"
+# ]
