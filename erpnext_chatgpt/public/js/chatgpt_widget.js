@@ -1,7 +1,15 @@
-// ERPNext ChatGPT Copilot Widget (Enterprise Frappe v16)
+// ERPNext ChatGPT Copilot Widget (Bulletproof & Isolated)
 (function () {
   let activeConversationId = null;
   let isSending = false;
+
+  function safeInit() {
+    try {
+      initChatGPTWidget();
+    } catch (err) {
+      console.warn("[AI Copilot] Safe initialization caught error (Desk unaffected):", err);
+    }
+  }
 
   function initChatGPTWidget() {
     if (document.getElementById("chatgpt-launcher-btn")) return;
@@ -11,12 +19,20 @@
     launcher.id = "chatgpt-launcher-btn";
     launcher.title = "Ask AI Copilot (Ctrl+Shift+K)";
     launcher.innerHTML = `
-      <svg viewBox="0 0 24 24">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor">
         <path d="M12 2C6.477 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5L2 22l5.223-1.282A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.95 7.95 0 01-4.223-1.205l-.303-.18-3.11.764.786-3.023-.197-.314A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8zm-1-12h2v4h-2zm0 6h2v2h-2z"/>
       </svg>
     `;
 
-    // 2. Create Drawer
+    // 2. Determine User Display Name Safely
+    let userName = "";
+    try {
+      userName = (frappe.session && (frappe.session.user_fullname || frappe.session.user)) || "";
+    } catch (e) {
+      userName = "";
+    }
+
+    // 3. Create Drawer
     const drawer = document.createElement("div");
     drawer.id = "chatgpt-drawer";
     drawer.innerHTML = `
@@ -44,7 +60,7 @@
       <div class="chatgpt-messages-container" id="chatgpt-messages">
         <div class="chatgpt-msg assistant">
           <div class="chatgpt-bubble">
-            Hello ${frappe.session.user_fullname || frappe.session.user || ""}! 👋<br>
+            Hello ${userName ? userName + " " : ""}👋<br>
             I am your ERPNext AI Copilot. Sensitive financial data (PAN, GSTIN, accounts) is automatically masked, and tool queries respect your permissions.
           </div>
         </div>
@@ -55,7 +71,7 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
         </button>
       </div>
-      <div style="font-size: 10px; color: var(--chatgpt-subtext); text-align: center; padding: 4px; background: var(--chatgpt-card-bg);">
+      <div style="font-size: 10px; color: var(--chatgpt-subtext, #888); text-align: center; padding: 4px; background: var(--chatgpt-card-bg, #f4f4f4);">
         🛡️ PII Masked • Read-Only ORM Tools • Drafts Only
       </div>
     `;
@@ -69,7 +85,9 @@
     document.getElementById("chatgpt-btn-new").addEventListener("click", startNewChat);
     document.getElementById("chatgpt-btn-fullscreen").addEventListener("click", function () {
       closeDrawer();
-      frappe.set_route("chatgpt_copilot", activeConversationId ? { conversation: activeConversationId } : {});
+      if (frappe.set_route) {
+        frappe.set_route("chatgpt_copilot", activeConversationId ? { conversation: activeConversationId } : {});
+      }
     });
 
     const sendBtn = document.getElementById("chatgpt-send-btn");
@@ -97,7 +115,7 @@
     });
 
     // Realtime WebSocket Listener for background async completions
-    if (frappe.realtime) {
+    if (window.frappe && frappe.realtime) {
       frappe.realtime.on("ai_chat_response", function (data) {
         removeTypingIndicator();
         isSending = false;
@@ -126,7 +144,8 @@
     if (!drawer) return;
     drawer.classList.add("is-open");
     updateCurrentContext();
-    document.getElementById("chatgpt-input").focus();
+    const input = document.getElementById("chatgpt-input");
+    if (input) input.focus();
   }
 
   function closeDrawer() {
@@ -135,13 +154,15 @@
   }
 
   function getCurrentDocContext() {
-    const route = frappe.get_route();
-    if (route && route[0] === "Form" && route[1] && route[2]) {
-      return {
-        doctype: route[1],
-        docname: route[2]
-      };
-    }
+    try {
+      const route = frappe.get_route ? frappe.get_route() : null;
+      if (route && route[0] === "Form" && route[1] && route[2]) {
+        return {
+          doctype: route[1],
+          docname: route[2]
+        };
+      }
+    } catch (e) {}
     return null;
   }
 
@@ -149,6 +170,7 @@
     const ctx = getCurrentDocContext();
     const bar = document.getElementById("chatgpt-context-bar");
     const txt = document.getElementById("chatgpt-context-text");
+    if (!bar || !txt) return;
     if (ctx) {
       txt.innerText = `📄 Context: ${ctx.doctype} #${ctx.docname}`;
       bar.style.display = "flex";
@@ -160,6 +182,7 @@
   function startNewChat() {
     activeConversationId = null;
     const container = document.getElementById("chatgpt-messages");
+    if (!container) return;
     container.innerHTML = `
       <div class="chatgpt-msg assistant">
         <div class="chatgpt-bubble">
@@ -172,6 +195,7 @@
 
   function appendMessage(role, text, logId) {
     const container = document.getElementById("chatgpt-messages");
+    if (!container) return;
     const msgDiv = document.createElement("div");
     msgDiv.className = `chatgpt-msg ${role}`;
 
@@ -189,7 +213,7 @@
     // Add Thumbs Up / Down feedback for assistant responses
     if (role === "assistant" && logId) {
       const fbDiv = document.createElement("div");
-      fbDiv.style.cssText = "display: flex; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--chatgpt-subtext);";
+      fbDiv.style.cssText = "display: flex; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--chatgpt-subtext, #888);";
       fbDiv.innerHTML = `
         <span style="cursor: pointer;" title="Helpful" class="chatgpt-fb-up">👍 Helpful</span>
         <span style="cursor: pointer;" title="Not helpful" class="chatgpt-fb-down">👎 Not Helpful</span>
@@ -219,6 +243,7 @@
 
   function showTypingIndicator() {
     const container = document.getElementById("chatgpt-messages");
+    if (!container) return;
     const typing = document.createElement("div");
     typing.id = "chatgpt-typing-indicator";
     typing.className = "chatgpt-msg assistant";
@@ -241,6 +266,7 @@
   function sendMessage() {
     if (isSending) return;
     const input = document.getElementById("chatgpt-input");
+    if (!input) return;
     const text = (input.value || "").trim();
     if (!text) return;
 
@@ -284,13 +310,14 @@
     });
   }
 
-  $(document).on("app_ready", function () {
-    initChatGPTWidget();
-  });
+  // Safe Lazy Launch: wait until Desk has fully booted up so we NEVER interfere with Frappe startup
+  function initWhenReady() {
+    setTimeout(safeInit, 600);
+  }
 
-  if (window.frappe && frappe.ready) {
-    frappe.ready(function () {
-      initChatGPTWidget();
-    });
+  if (document.readyState === "complete") {
+    initWhenReady();
+  } else {
+    window.addEventListener("load", initWhenReady);
   }
 })();

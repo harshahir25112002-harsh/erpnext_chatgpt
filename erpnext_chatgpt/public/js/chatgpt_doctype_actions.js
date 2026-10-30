@@ -1,47 +1,55 @@
-// Automatic AI Action Buttons on ERPNext DocType Forms
+// Automatic AI Action Buttons on ERPNext DocType Forms (Protected)
 (function () {
   let templateCache = {};
 
   $(document).on("form-refresh", function (event, frm) {
-    if (!frm || !frm.doc || frm.is_new()) return;
+    try {
+      if (!frm || !frm.doc || frm.is_new()) return;
 
-    const doctype = frm.doctype;
+      const doctype = frm.doctype;
+      if (!doctype) return;
 
-    // Check if templates already cached
-    if (templateCache[doctype] !== undefined) {
-      renderAiButtons(frm, templateCache[doctype]);
-      return;
-    }
-
-    frappe.call({
-      method: "erpnext_chatgpt.api.get_templates_for_doctype",
-      args: { doctype: doctype },
-      callback: function (r) {
-        templateCache[doctype] = r.message || [];
+      if (templateCache[doctype] !== undefined) {
         renderAiButtons(frm, templateCache[doctype]);
+        return;
       }
-    });
+
+      frappe.call({
+        method: "erpnext_chatgpt.api.get_templates_for_doctype",
+        args: { doctype: doctype },
+        callback: function (r) {
+          try {
+            templateCache[doctype] = r.message || [];
+            renderAiButtons(frm, templateCache[doctype]);
+          } catch (e) {}
+        }
+      });
+    } catch (err) {
+      console.warn("[AI Actions] Form button setup skipped safely:", err);
+    }
   });
 
   function renderAiButtons(frm, templates) {
-    // 1. Add Default "✨ Ask AI about this document"
-    frm.add_custom_button(__("Ask AI about this Doc"), function () {
-      openFreeformDocPrompt(frm);
-    }, __("✨ AI Actions"));
+    try {
+      // 1. Add Default "✨ Ask AI about this document"
+      frm.add_custom_button(__("Ask AI about this Doc"), function () {
+        openFreeformDocPrompt(frm);
+      }, __("✨ AI Actions"));
 
-    // 2. Add any configured Prompt Templates
-    if (templates && templates.length > 0) {
-      templates.forEach(function (tpl) {
-        frm.add_custom_button(__(tpl.btn_label || tpl.template_name), function () {
-          executeTemplate(frm, tpl);
-        }, __("✨ AI Actions"));
-      });
-    }
+      // 2. Add any configured Prompt Templates
+      if (templates && templates.length > 0) {
+        templates.forEach(function (tpl) {
+          frm.add_custom_button(__(tpl.btn_label || tpl.template_name), function () {
+            executeTemplate(frm, tpl);
+          }, __("✨ AI Actions"));
+        });
+      }
+    } catch (e) {}
   }
 
   function executeTemplate(frm, tpl) {
     frappe.show_alert({
-      message: __("Asking ChatGPT ({0})...", [tpl.template_name]),
+      message: __("Asking AI ({0})...", [tpl.template_name]),
       indicator: "blue"
     });
 
@@ -52,7 +60,7 @@
         doc: JSON.stringify(frm.doc)
       },
       freeze: true,
-      freeze_message: __("ChatGPT is processing {0}...", [tpl.template_name]),
+      freeze_message: __("Processing {0}...", [tpl.template_name]),
       callback: function (r) {
         if (!r.message) return;
         const res = r.message;
@@ -70,7 +78,6 @@
             indicator: "green"
           });
         } else {
-          // Popup Dialog
           showAiResultDialog(tpl.template_name, res.reply);
         }
       }
@@ -89,7 +96,7 @@
           description: __("Example: 'Summarize key points', 'Draft an email response to this customer', or 'Check if fields look consistent'.")
         }
       ],
-      primary_action_label: __("Ask ChatGPT"),
+      primary_action_label: __("Ask AI"),
       primary_action: function (values) {
         d.hide();
         frappe.call({
@@ -100,7 +107,7 @@
             reference_name: frm.doc.name
           },
           freeze: true,
-          freeze_message: __("Consulting ChatGPT..."),
+          freeze_message: __("Consulting AI..."),
           callback: function (r) {
             if (r.message && r.message.reply) {
               showAiResultDialog(__("AI Answer for {0}", [frm.doc.name]), r.message.reply);
@@ -132,4 +139,3 @@
     d.show();
   }
 })();
-
