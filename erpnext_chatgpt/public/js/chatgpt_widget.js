@@ -44,7 +44,7 @@
       <div class="chatgpt-messages-container" id="chatgpt-messages">
         <div class="chatgpt-msg assistant">
           <div class="chatgpt-bubble">
-            Hello ${frappe.session.logged_in_user ? frappe.user.first_name() : ""}! 👋<br>
+            Hello ${frappe.session.user_fullname || frappe.session.user || ""}! 👋<br>
             I am your ERPNext AI Copilot. Sensitive financial data (PAN, GSTIN, accounts) is automatically masked, and tool queries respect your permissions.
           </div>
         </div>

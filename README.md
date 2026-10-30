@@ -1,3 +1,6 @@
+<<<<<<< HEAD
+# erpnext_chatgpt
+=======
 # 🚀 Enterprise AI & ChatGPT Copilot for ERPNext / Frappe v16
 
 A secure, zero-data-breach, production-grade AI Copilot for **ERPNext** and **Frappe Framework v16**. Built to satisfy strict corporate governance, compliance, data masking, and cost-control requirements.
@@ -111,3 +114,4 @@ bench restart
 bench --site <your-site-name> run-tests --app erpnext_chatgpt
 ```
 Tests data masking regex, prompt injection blocks, token cost calculators, and mocked LLM responses without consuming API credits.
+>>>>>>> e49c9c6 (feat: complete enterprise ChatGPT and AI Copilot integration for Frappe v16)

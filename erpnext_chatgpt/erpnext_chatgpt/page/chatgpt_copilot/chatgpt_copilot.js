@@ -137,7 +137,8 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
   function appendMessageUI(role, text) {
     const area = container.find("#page-messages-area");
     const isUser = role === "user";
-    const avatar = isUser ? `<div class="chatgpt-avatar user-avatar">${frappe.user.first_name().charAt(0)}</div>` : `<div class="chatgpt-avatar ai-avatar">AI</div>`;
+    const userInitial = (frappe.session.user_fullname || frappe.session.user || "U").charAt(0).toUpperCase();
+    const avatar = isUser ? `<div class="chatgpt-avatar user-avatar">${userInitial}</div>` : `<div class="chatgpt-avatar ai-avatar">AI</div>`;
     const formatted = !isUser && typeof frappe.markdown === "function" ? frappe.markdown(text) : frappe.utils.escape_html(text);
 
     const msg = $(`
