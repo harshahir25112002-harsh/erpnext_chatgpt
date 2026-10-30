@@ -125,7 +125,7 @@ def execute_chat_completion(messages: list, tools: list = None, tool_choice: str
     # If all attempts fail, log and throw friendly message
     latency = round(time.time() - start_time, 2)
     frappe.log_error(title="AI Provider Request Failed", message=f"Provider: {provider}, Model: {model}, Error: {str(last_error)}")
-    frappe.throw(_("AI Service Error: {0}").format(str(last_error)), frappe.OperationalError)
+    frappe.throw(_("AI Service Error: {0}").format(str(last_error)), frappe.ValidationError)
 
 def call_openai_compatible(settings, api_key, model, messages, temperature, max_tokens, tools=None, tool_choice="auto"):
     base_url = (settings.base_url or "https://api.openai.com/v1").rstrip("/")
