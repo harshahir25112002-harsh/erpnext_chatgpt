@@ -1,0 +1,175 @@
+{
+ "actions": [],
+ "autoname": "format:AILOG-{YYYY}-{MM}-{#####}",
+ "creation": "2026-10-30 18:40:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_section",
+  "user",
+  "status",
+  "col_break_1",
+  "provider",
+  "model",
+  "reference_doctype",
+  "reference_name",
+  "metrics_section",
+  "prompt_tokens",
+  "completion_tokens",
+  "total_tokens",
+  "col_break_2",
+  "estimated_cost_usd",
+  "latency_sec",
+  "feedback",
+  "payload_section",
+  "prompt_text",
+  "response_text",
+  "error_message"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_section",
+   "fieldtype": "Section Break",
+   "label": "Execution Overview"
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Success\nFailed\nRate Limited\nBlocked",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Provider",
+   "read_only": 1
+  },
+  {
+   "fieldname": "model",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Model",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Reference DocType",
+   "options": "DocType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Reference Document",
+   "options": "reference_doctype",
+   "read_only": 1
+  },
+  {
+   "fieldname": "metrics_section",
+   "fieldtype": "Section Break",
+   "label": "Metrics & Cost"
+  },
+  {
+   "fieldname": "prompt_tokens",
+   "fieldtype": "Int",
+   "label": "Prompt Tokens",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completion_tokens",
+   "fieldtype": "Int",
+   "label": "Completion Tokens",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_tokens",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Total Tokens",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "estimated_cost_usd",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Estimated Cost (USD)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "latency_sec",
+   "fieldtype": "Float",
+   "label": "Latency (Seconds)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "feedback",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "User Feedback",
+   "options": "\nThumbs Up\nThumbs Down"
+  },
+  {
+   "fieldname": "payload_section",
+   "fieldtype": "Section Break",
+   "label": "Payloads"
+  },
+  {
+   "fieldname": "prompt_text",
+   "fieldtype": "Long Text",
+   "label": "Sanitized Prompt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "response_text",
+   "fieldtype": "Long Text",
+   "label": "Model Response",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Trace (if failed)",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-10-30 18:40:00.000000",
+ "modified_by": "Administrator",
+ "module": "erpnext_chatgpt",
+ "name": "AI Request Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
+

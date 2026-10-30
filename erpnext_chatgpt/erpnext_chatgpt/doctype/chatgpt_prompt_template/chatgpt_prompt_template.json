@@ -1,0 +1,125 @@
+{
+ "actions": [],
+ "autoname": "format:{template_name}",
+ "creation": "2026-10-30 18:30:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_section",
+  "template_name",
+  "reference_doctype",
+  "is_active",
+  "col_break_1",
+  "action_type",
+  "target_field",
+  "btn_label",
+  "prompt_section",
+  "custom_system_prompt",
+  "prompt_template",
+  "help_html"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_section",
+   "fieldtype": "Section Break",
+   "label": "Action Details"
+  },
+  {
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Template Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Reference DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Active"
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Popup Dialog",
+   "fieldname": "action_type",
+   "fieldtype": "Select",
+   "label": "Action Output Type",
+   "options": "Popup Dialog\nFill Field\nAdd Timeline Comment"
+  },
+  {
+   "depends_on": "eval:doc.action_type=='Fill Field'",
+   "fieldname": "target_field",
+   "fieldtype": "Data",
+   "label": "Target Field Name (in DocType)"
+  },
+  {
+   "default": "Ask AI",
+   "fieldname": "btn_label",
+   "fieldtype": "Data",
+   "label": "Button Label"
+  },
+  {
+   "fieldname": "prompt_section",
+   "fieldtype": "Section Break",
+   "label": "Prompt Template"
+  },
+  {
+   "fieldname": "custom_system_prompt",
+   "fieldtype": "Small Text",
+   "label": "Custom System Prompt (Optional)"
+  },
+  {
+   "description": "Supports Jinja syntax, e.g.: Summarize this issue: {{ doc.subject }} - Details: {{ doc.description }}",
+   "fieldname": "prompt_template",
+   "fieldtype": "Code",
+   "label": "User Prompt Template (Jinja)",
+   "options": "Jinja",
+   "reqd": 1
+  },
+  {
+   "fieldname": "help_html",
+   "fieldtype": "HTML",
+   "label": "Help",
+   "options": "<div class='text-muted small'>Available variables in Jinja template: <code>doc</code> (current document fields), <code>frappe</code>, <code>user</code>.</div>"
+  }
+ ],
+ "links": [],
+ "modified": "2026-10-30 18:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "erpnext_chatgpt",
+ "name": "ChatGPT Prompt Template",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "All"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
+

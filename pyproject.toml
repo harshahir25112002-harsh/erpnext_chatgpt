@@ -1,0 +1,21 @@
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "erpnext_chatgpt"
+authors = [
+    { name = "Custom AI Integration", email = "admin@example.com"}
+]
+description = "ChatGPT & AI Copilot Integration for ERPNext / Frappe v16"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+    "openai>=1.0.0",
+    "requests"
+]
+
+[tool.flit.module]
+name = "erpnext_chatgpt"
+

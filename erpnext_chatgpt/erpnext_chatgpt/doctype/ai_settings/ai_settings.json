@@ -1,0 +1,197 @@
+{
+ "actions": [],
+ "creation": "2026-10-30 18:40:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "general_section",
+  "enabled",
+  "site_disabled",
+  "provider",
+  "col_break_1",
+  "model",
+  "reasoning_model",
+  "api_section",
+  "api_key",
+  "base_url",
+  "col_break_2",
+  "organization_id",
+  "test_connection_btn",
+  "governance_section",
+  "monthly_budget_cap_usd",
+  "daily_limit_per_user",
+  "col_break_3",
+  "mask_sensitive_data",
+  "enable_tool_calling",
+  "parameters_section",
+  "temperature",
+  "max_tokens",
+  "system_section",
+  "global_system_prompt",
+  "privacy_disclaimer"
+ ],
+ "fields": [
+  {
+   "fieldname": "general_section",
+   "fieldtype": "Section Break",
+   "label": "Foundation & Status"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enable AI Copilot"
+  },
+  {
+   "default": "0",
+   "fieldname": "site_disabled",
+   "fieldtype": "Check",
+   "label": "Emergency Disable (All Users)"
+  },
+  {
+   "default": "OpenAI",
+   "fieldname": "provider",
+   "fieldtype": "Select",
+   "label": "AI Provider",
+   "options": "OpenAI\nAzure OpenAI\nAnthropic\nOllama / Local (Private)"
+  },
+  {
+   "fieldname": "col_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "gpt-4o-mini",
+   "fieldname": "model",
+   "fieldtype": "Select",
+   "label": "Standard Model (Fast / Classification)",
+   "options": "gpt-4o-mini\ngpt-4o\ngpt-4-turbo\nclaude-3-5-sonnet-20241022\nclaude-3-haiku-20240307\nllama3.2\nqwen2.5\ncustom"
+  },
+  {
+   "default": "gpt-4o",
+   "fieldname": "reasoning_model",
+   "fieldtype": "Select",
+   "label": "Reasoning Model (Complex Tasks)",
+   "options": "gpt-4o\no1-mini\no1-preview\nclaude-3-5-sonnet-20241022\ncustom"
+  },
+  {
+   "fieldname": "api_section",
+   "fieldtype": "Section Break",
+   "label": "API Credentials"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "label": "API Secret Key"
+  },
+  {
+   "default": "https://api.openai.com/v1",
+   "fieldname": "base_url",
+   "fieldtype": "Data",
+   "label": "API Base URL (e.g., http://localhost:11434/v1 for Ollama)"
+  },
+  {
+   "fieldname": "col_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "organization_id",
+   "fieldtype": "Data",
+   "label": "Organization ID (Optional)"
+  },
+  {
+   "fieldname": "test_connection_btn",
+   "fieldtype": "Button",
+   "label": "Test Provider Connection"
+  },
+  {
+   "fieldname": "governance_section",
+   "fieldtype": "Section Break",
+   "label": "Security, Privacy & Cost Governance"
+  },
+  {
+   "default": "50.00",
+   "fieldname": "monthly_budget_cap_usd",
+   "fieldtype": "Currency",
+   "label": "Monthly Budget Cap (USD)"
+  },
+  {
+   "default": "100",
+   "fieldname": "daily_limit_per_user",
+   "fieldtype": "Int",
+   "label": "Max Requests / User / Day"
+  },
+  {
+   "fieldname": "col_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "mask_sensitive_data",
+   "fieldtype": "Check",
+   "label": "Mask Sensitive Data (PAN, GSTIN, Cards, Bank Accs)"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_tool_calling",
+   "fieldtype": "Check",
+   "label": "Enable Read-Only Tool Calling (Stock, Balances)"
+  },
+  {
+   "fieldname": "parameters_section",
+   "fieldtype": "Section Break",
+   "label": "Parameters"
+  },
+  {
+   "default": "0.7",
+   "fieldname": "temperature",
+   "fieldtype": "Float",
+   "label": "Temperature (0.0 to 1.0)"
+  },
+  {
+   "default": "1000",
+   "fieldname": "max_tokens",
+   "fieldtype": "Int",
+   "label": "Max Completion Tokens"
+  },
+  {
+   "fieldname": "system_section",
+   "fieldtype": "Section Break",
+   "label": "Prompts & Compliance Notice"
+  },
+  {
+   "default": "You are an intelligent AI Copilot for Frappe/ERPNext v16. Respect all user permissions. Always generate output clearly and label actions accurately.",
+   "fieldname": "global_system_prompt",
+   "fieldtype": "Small Text",
+   "label": "Global System Prompt"
+  },
+  {
+   "default": "Notice: Prompts and sanitized document excerpts are processed by third-party AI endpoints according to our enterprise security policies. PII is automatically masked.",
+   "fieldname": "privacy_disclaimer",
+   "fieldtype": "Small Text",
+   "label": "User Privacy Disclaimer"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-30 18:40:00.000000",
+ "modified_by": "Administrator",
+ "module": "erpnext_chatgpt",
+ "name": "AI Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
+

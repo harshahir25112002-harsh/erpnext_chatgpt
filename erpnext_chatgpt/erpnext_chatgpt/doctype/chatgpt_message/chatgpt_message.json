@@ -1,0 +1,54 @@
+{
+ "actions": [],
+ "creation": "2026-10-30 18:30:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "role",
+  "tokens",
+  "timestamp",
+  "content"
+ ],
+ "fields": [
+  {
+   "fieldname": "role",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Role",
+   "options": "user\nassistant\nsystem",
+   "reqd": 1
+  },
+  {
+   "fieldname": "tokens",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Tokens"
+  },
+  {
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Timestamp"
+  },
+  {
+   "fieldname": "content",
+   "fieldtype": "Long Text",
+   "in_list_view": 1,
+   "label": "Content",
+   "reqd": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-30 18:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "erpnext_chatgpt",
+ "name": "ChatGPT Message",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
+
