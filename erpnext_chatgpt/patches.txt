@@ -1,2 +1,1 @@
-# Patches
-
+erpnext_chatgpt.patches.remove_legacy_doctypes

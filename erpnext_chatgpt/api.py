@@ -262,13 +262,11 @@ def run_prompt_template(template_name, doc):
         if not frappe.has_permission(doctype, "read", doc=docname):
             frappe.throw(_("Permission denied to read {0} {1}.").format(doctype, docname), frappe.PermissionError)
 
-    # Look up template (check both Prompt Template and ChatGPT Prompt Template)
-    if frappe.db.exists("Prompt Template", template_name):
-        template = frappe.get_doc("Prompt Template", template_name)
-    elif frappe.db.exists("ChatGPT Prompt Template", template_name):
-        template = frappe.get_doc("ChatGPT Prompt Template", template_name)
-    else:
+    # Look up Prompt Template
+    if not frappe.db.exists("Prompt Template", template_name):
         frappe.throw(_("Template '{0}' does not exist.").format(template_name))
+
+    template = frappe.get_doc("Prompt Template", template_name)
 
     if not template.is_active:
         frappe.throw(_("Template '{0}' is inactive.").format(template_name))
@@ -341,17 +339,11 @@ def get_templates_for_doctype(doctype):
     """
     Retrieves active templates available for a DocType.
     """
-    res1 = frappe.get_all(
+    return frappe.get_all(
         "Prompt Template",
         filters={"reference_doctype": doctype, "is_active": 1},
         fields=["name", "template_name", "btn_label", "action_type", "target_field"]
     )
-    res2 = frappe.get_all(
-        "ChatGPT Prompt Template",
-        filters={"reference_doctype": doctype, "is_active": 1},
-        fields=["name", "template_name", "btn_label", "action_type", "target_field"]
-    )
-    return res1 + res2
 
 @frappe.whitelist()
 def get_user_conversations():
