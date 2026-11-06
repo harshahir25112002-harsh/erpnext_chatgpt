@@ -49,9 +49,6 @@ def log_ai_request(user, status, provider, model, prompt, response, usage, cost,
 
 @frappe.whitelist()
 def test_connection():
-    """
-    Validates credentials and endpoint connectivity.
-    """
     try:
         messages = [
             {"role": "system", "content": "You are a test assistant. Reply 'Connected successfully' only."},
@@ -74,21 +71,12 @@ def test_connection():
 
 @frappe.whitelist()
 def chat(message, conversation_id=None, reference_doctype=None, reference_name=None, async_mode=False):
-    """
-    Secure Whitelisted Chat Endpoint:
-    1. Validates prompt injection.
-    2. Validates DocType read permissions (never bypasses security).
-    3. Masks sensitive data (PAN, GSTIN, Bank, Cards).
-    4. Supports read-only Tool Calling.
-    5. Audits every call in AI Request Log with token and cost tracking.
-    """
     if not message or not message.strip():
         frappe.throw(_("Message cannot be empty."))
 
     user = frappe.session.user
     validate_prompt_injection(message)
 
-    # If background async processing requested
     if frappe.utils.cint(async_mode):
         frappe.enqueue(
             "erpnext_chatgpt.api.async_chat_worker",
@@ -106,7 +94,6 @@ def chat(message, conversation_id=None, reference_doctype=None, reference_name=N
 def _process_chat(user, message, conversation_id=None, reference_doctype=None, reference_name=None):
     settings = frappe.get_single("AI Settings")
 
-    # Conversation history handling
     if conversation_id and frappe.db.exists("ChatGPT Conversation", conversation_id):
         conv_doc = frappe.get_doc("ChatGPT Conversation", conversation_id)
         if conv_doc.user != user and "System Manager" not in frappe.get_roles():
@@ -123,12 +110,17 @@ def _process_chat(user, message, conversation_id=None, reference_doctype=None, r
         })
         conv_doc.insert()
 
-    # Prepare message thread
     messages = []
-    sys_prompt = settings.global_system_prompt or "You are an intelligent ERPNext Copilot."
+    sys_prompt = (
+        (settings.global_system_prompt or "You are an intelligent ERPNext Copilot.") +
+        "\nIMPORTANT: When mentioning ERPNext forms or reports, always format them as clickable Markdown links using relative paths like:\n"
+        "- [Sales Invoices](/app/sales-invoice)\n"
+        "- [Purchase Orders](/app/purchase-order)\n"
+        "- [Stock Balance Report](/app/query-report/Stock%20Balance)\n"
+        "- [General Ledger](/app/query-report/General%20Ledger)\n"
+    )
     messages.append({"role": "system", "content": sys_prompt})
 
-    # Context injection with strict permission check and data masking
     if reference_doctype and reference_name:
         sanitized_doc = sanitize_doc_for_llm(reference_doctype, reference_name)
         messages.append({
@@ -136,29 +128,21 @@ def _process_chat(user, message, conversation_id=None, reference_doctype=None, r
             "content": f"The user is viewing {reference_doctype} #{reference_name}.\nDocument Excerpt:\n{json.dumps(sanitized_doc, default=str)}"
         })
 
-    # Previous messages (last 8)
     for m in conv_doc.messages[-8:]:
         messages.append({"role": m.role, "content": m.content})
 
-    # Current user message (masked if enabled)
     user_prompt = mask_sensitive_text(message) if settings.mask_sensitive_data else message
     messages.append({"role": "user", "content": user_prompt})
 
-    # Tool calling support
     tools = AVAILABLE_TOOLS if settings.enable_tool_calling else None
-
-    # Execute provider call
     res = execute_chat_completion(messages, tools=tools)
-
     reply_content = res.get("content") or ""
 
-    # Check if tool calls were triggered
     tool_calls = res.get("tool_calls") or []
     if tool_calls:
-        # Append assistant tool call message
         messages.append({
             "role": "assistant",
-            "content": reply_content or "Calling external tool...",
+            "content": reply_content or "Consulting live ERP database...",
             "tool_calls": tool_calls
         })
 
@@ -179,16 +163,13 @@ def _process_chat(user, message, conversation_id=None, reference_doctype=None, r
                 "content": json.dumps(tool_result, default=str)
             })
 
-        # Final completion to summarize tool results
         second_res = execute_chat_completion(messages, tools=None)
         reply_content = second_res.get("content") or ""
-        # Aggregate usage and cost
         res["usage"]["prompt_tokens"] += second_res["usage"].get("prompt_tokens", 0)
         res["usage"]["completion_tokens"] += second_res["usage"].get("completion_tokens", 0)
         res["usage"]["total_tokens"] += second_res["usage"].get("total_tokens", 0)
         res["cost_usd"] += second_res.get("cost_usd", 0.0)
 
-    # Save to conversation history
     conv_doc.append("messages", {
         "role": "user",
         "content": message,
@@ -204,7 +185,6 @@ def _process_chat(user, message, conversation_id=None, reference_doctype=None, r
     conv_doc.total_tokens = (conv_doc.total_tokens or 0) + res["usage"].get("total_tokens", 0)
     conv_doc.save()
 
-    # Log in AI Request Log
     log_id = log_ai_request(
         user, res["status"], res["provider"], res["model"],
         user_prompt, reply_content, res["usage"], res["cost_usd"], res["latency_sec"],
@@ -223,10 +203,6 @@ def _process_chat(user, message, conversation_id=None, reference_doctype=None, r
     }
 
 def async_chat_worker(user, message, conversation_id=None, reference_doctype=None, reference_name=None):
-    """
-    Background worker executed via frappe.enqueue.
-    Publishes realtime results to web frontend via WebSocket.
-    """
     try:
         frappe.set_user(user)
         res = _process_chat(user, message, conversation_id, reference_doctype, reference_name)
@@ -245,13 +221,6 @@ def async_chat_worker(user, message, conversation_id=None, reference_doctype=Non
 
 @frappe.whitelist()
 def run_prompt_template(template_name, doc):
-    """
-    Executes a pre-configured prompt template with strict authorization:
-    - Never uses raw SQL
-    - Validates doc read permissions
-    - Masks PAN, GSTIN, and personal identifiers
-    - Creates drafts only (docstatus=0) if writing
-    """
     if isinstance(doc, str):
         doc = json.loads(doc)
 
@@ -262,7 +231,6 @@ def run_prompt_template(template_name, doc):
         if not frappe.has_permission(doctype, "read", doc=docname):
             frappe.throw(_("Permission denied to read {0} {1}.").format(doctype, docname), frappe.PermissionError)
 
-    # Look up Prompt Template
     if not frappe.db.exists("Prompt Template", template_name):
         frappe.throw(_("Template '{0}' does not exist.").format(template_name))
 
@@ -271,7 +239,6 @@ def run_prompt_template(template_name, doc):
     if not template.is_active:
         frappe.throw(_("Template '{0}' is inactive.").format(template_name))
 
-    # Mask sensitive fields inside doc dictionary before Jinja rendering
     sanitized_doc = sanitize_doc_for_llm(doctype, docname) if (doctype and docname) else doc
 
     context = {
@@ -292,7 +259,6 @@ def run_prompt_template(template_name, doc):
     res = execute_chat_completion(messages)
     reply = res.get("content", "")
 
-    # If action is to add comment
     if template.action_type == "Add Timeline Comment" and doctype and docname:
         if frappe.has_permission(doctype, "write", doc=docname):
             frappe.get_doc({
@@ -303,7 +269,6 @@ def run_prompt_template(template_name, doc):
                 "content": f"<b>🤖 AI Generated ({template.template_name}):</b><br>{reply}"
             }).insert()
 
-    # Log in AI Request Log
     log_id = log_ai_request(
         frappe.session.user, res["status"], res["provider"], res["model"],
         rendered_prompt, reply, res["usage"], res["cost_usd"], res["latency_sec"],
@@ -322,9 +287,6 @@ def run_prompt_template(template_name, doc):
 
 @frappe.whitelist()
 def submit_feedback(log_id, feedback):
-    """
-    Records thumbs up/down user feedback on AI responses.
-    """
     if not frappe.db.exists("AI Request Log", log_id):
         frappe.throw(_("Log entry not found."))
     log_doc = frappe.get_doc("AI Request Log", log_id)
@@ -336,9 +298,6 @@ def submit_feedback(log_id, feedback):
 
 @frappe.whitelist()
 def get_templates_for_doctype(doctype):
-    """
-    Retrieves active templates available for a DocType.
-    """
     return frappe.get_all(
         "Prompt Template",
         filters={"reference_doctype": doctype, "is_active": 1},
@@ -384,15 +343,19 @@ def delete_conversation(conversation_id):
     frappe.delete_doc("ChatGPT Conversation", conversation_id)
     return {"status": "success"}
 
-
 @frappe.whitelist()
 def trigger_manual_briefing():
     """
-    Manually triggers the Executive Morning Briefing for immediate testing.
+    Manually triggers the Executive Morning Briefing and returns content for immediate display.
     """
-    from erpnext_chatgpt.briefing import send_daily_executive_briefing
+    from erpnext_chatgpt.briefing import generate_briefing_content, send_daily_executive_briefing
+    content = generate_briefing_content()
     send_daily_executive_briefing()
-    return {"status": "success", "message": _("Morning Briefing generated and posted to your notifications.")}
+    return {
+        "status": "success",
+        "briefing_content": content,
+        "message": _("Morning Briefing generated successfully.")
+    }
 
 @frappe.whitelist()
 def diagnose_error(doctype, docname, error_message=None):
@@ -402,14 +365,13 @@ def diagnose_error(doctype, docname, error_message=None):
     from erpnext_chatgpt.tools import tool_diagnose_document_error
     result = tool_diagnose_document_error(doctype, docname, error_message)
     
-    # Formulate conversational solution
     prompt = (
         f"A user encountered this error in ERPNext:\n"
         f"DocType: {doctype}, Record: {docname}\n"
         f"Error: {error_message}\n"
         f"Diagnostic Findings: {result.get('diagnostic_findings')}\n"
         f"Remediation Steps: {result.get('remediation_steps')}\n\n"
-        "Explain clearly in simple, friendly terms: 1) What caused this error, and 2) The exact steps to fix it right now."
+        "Explain clearly in simple, friendly terms: 1) What caused this error, and 2) The exact steps to fix it right now. Include clickable markdown links if appropriate."
     )
     messages = [
         {"role": "system", "content": "You are an expert ERPNext technical troubleshooter."},
@@ -427,7 +389,7 @@ def diagnose_error(doctype, docname, error_message=None):
 @frappe.whitelist()
 def extract_invoice_and_draft(file_url):
     """
-    Extracts invoice data from an uploaded PDF or image file and creates a Draft Purchase Invoice.
+    Extracts invoice data from an uploaded file and creates a Draft Purchase Invoice.
     """
     if not frappe.has_permission("Purchase Invoice", "create"):
         frappe.throw(_("Permission denied: You cannot create Purchase Invoices."), frappe.PermissionError)
@@ -437,35 +399,58 @@ def extract_invoice_and_draft(file_url):
 
     file_doc = frappe.get_doc("File", {"file_url": file_url})
     file_path = file_doc.get_full_path()
+    extracted_text = ""
+
+    # Attempt text extraction based on file type
+    try:
+        lower_path = file_path.lower()
+        if lower_path.endswith((".txt", ".csv", ".json", ".html", ".htm")):
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                extracted_text = f.read()[:5000]
+        elif lower_path.endswith(".pdf"):
+            try:
+                import pypdf
+                reader = pypdf.PdfReader(file_path)
+                extracted_text = "\n".join([page.extract_text() or "" for page in reader.pages[:4]])[:5000]
+            except Exception:
+                extracted_text = f"PDF invoice file: {file_doc.file_name}"
+        else:
+            extracted_text = f"Image invoice file: {file_doc.file_name}"
+    except Exception:
+        extracted_text = f"File: {file_doc.file_name}"
 
     prompt = (
-        "Extract the supplier name, invoice/bill number, and all line items (name, quantity, unit rate) "
-        "from this invoice text or file. Return pure JSON with structure: "
-        "{\"supplier\": \"Supplier Name\", \"bill_no\": \"INV-123\", \"items\": [{\"item_code\": \"ITEM-NAME\", \"qty\": 1, \"rate\": 100}]}"
+        "Analyze the following text from an uploaded invoice or document.\n"
+        "If it is a valid invoice or bill, extract the supplier name, bill number, and line items.\n"
+        "If the document is NOT an invoice (e.g. documentation, terms, sample website text), output: {\"is_invoice\": false, \"reason\": \"Not an invoice document.\"}\n"
+        "If it IS an invoice, output pure JSON:\n"
+        "{\"is_invoice\": true, \"supplier\": \"Supplier Name\", \"bill_no\": \"INV-123\", \"items\": [{\"item_code\": \"ITEM\", \"qty\": 1, \"rate\": 100}]}\n\n"
+        f"File Name: {file_doc.file_name}\n"
+        f"Content Excerpt:\n{extracted_text or 'No text extracted'}"
     )
 
-    # Simple text or OCR extraction
-    extracted_text = f"File: {file_doc.file_name}, attached to invoice."
     messages = [
         {"role": "system", "content": "You are an AI document parser that strictly outputs valid JSON."},
-        {"role": "user", "content": f"{prompt}\n\nFile info: {extracted_text}"}
+        {"role": "user", "content": prompt}
     ]
     res = execute_chat_completion(messages)
     raw_content = res.get("content", "{}").strip()
 
-    # Parse JSON
+    import re
     try:
-        import re
         json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
         if json_match:
             data = json.loads(json_match.group(0))
         else:
             data = json.loads(raw_content)
     except Exception:
-        data = {
-            "supplier": frappe.db.get_value("Supplier", {}, "name") or "Default Supplier",
-            "bill_no": file_doc.file_name,
-            "items": [{"item_code": frappe.db.get_value("Item", {}, "name") or "Item", "qty": 1, "rate": 100}]
+        data = {"is_invoice": False, "reason": "Failed to parse invoice structure from file."}
+
+    if not data.get("is_invoice", True):
+        return {
+            "status": "warning",
+            "message": data.get("reason", "Uploaded document is not a valid invoice."),
+            "file_name": file_doc.file_name
         }
 
     from erpnext_chatgpt.tools import tool_create_draft_purchase_invoice

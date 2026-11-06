@@ -1,4 +1,4 @@
-// Dedicated Full-Page AI Copilot 3.0 (Voice, Vision, Tools & Diagnostics)
+// Dedicated Full-Page AI Copilot 3.1 (Robust Routing, Clean File Parsing, Smooth Scrolling)
 frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
   var page = frappe.ui.make_app_page({
     parent: wrapper,
@@ -12,7 +12,7 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
   let isListening = false;
 
   const starterCardsHtml = `
-    <div class="text-center" style="margin-top: 20px; margin-bottom: 20px;">
+    <div class="text-center" style="margin-top: 15px; margin-bottom: 20px;">
       <h3 style="font-weight: 600; margin-bottom: 6px;">${__('Welcome to ERPNext AI Copilot')}</h3>
       <p class="text-muted" style="font-size: 13.5px;">${__('Ask questions, check live stock & balances, diagnose errors, or speak with voice.')}</p>
     </div>
@@ -85,13 +85,27 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     </div>
   `).appendTo(page.main);
 
+  // Global Link Interceptor: makes EVERY /app/... link in the chat open smoothly in Frappe Desk!
+  container.on("click", ".chatgpt-page-bubble a", function (e) {
+    const href = $(this).attr("href");
+    if (href && (href.startsWith("/app") || href.startsWith("app/"))) {
+      e.preventDefault();
+      const rawRoute = href.replace(/^\/?app\/?/, "");
+      // Split route and query parameters
+      const parts = rawRoute.split("?")[0].split("/").filter(Boolean);
+      if (parts.length > 0) {
+        frappe.set_route(parts);
+      }
+    }
+  });
+
   // Initialize Speech Recognition
   if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
     const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     speechRecognizer = new SpeechAPI();
     speechRecognizer.continuous = false;
     speechRecognizer.interimResults = false;
-    speechRecognizer.lang = 'en-IN'; // Works great for Indian English, Hindi, etc.
+    speechRecognizer.lang = 'en-IN';
 
     speechRecognizer.onstart = function () {
       isListening = true;
@@ -136,34 +150,49 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     container.find("#page-btn-mic").removeClass("is-recording").attr("title", __("Voice Input"));
   }
 
-  // Invoice File Upload
+  // Invoice File Upload & Extraction
   function openInvoiceUploader() {
     new frappe.ui.FileUploader({
       allow_multiple: false,
       restrictions: {
-        allowed_file_types: [".pdf", ".png", ".jpg", ".jpeg"]
+        allowed_file_types: [".pdf", ".png", ".jpg", ".jpeg", ".txt", ".csv"]
       },
       on_success: function (file_doc) {
         frappe.show_alert({ message: __("Analyzing invoice with AI..."), indicator: "blue" });
-        appendMessageUI("user", `📎 ${__('Uploaded Invoice')}: <b>${file_doc.file_name}</b>`);
+        if (container.find(".chatgpt-starter-grid").length > 0) {
+          container.find("#page-messages-area").empty();
+        }
+        appendMessageUI("user", `📎 ${__('Uploaded File')}: <b>${file_doc.file_name}</b>`);
         
         frappe.call({
           method: "erpnext_chatgpt.api.extract_invoice_and_draft",
           args: { file_url: file_doc.file_url },
           freeze: true,
-          freeze_message: __("Extracting invoice and drafting Purchase Invoice..."),
+          freeze_message: __("Analyzing file and drafting Purchase Invoice..."),
           callback: function (r) {
-            if (r.message && r.message.status === "success") {
+            if (!r.message) {
+              appendMessageUI("assistant", "⚠️ " + __('No response from document extractor.'));
+              return;
+            }
+
+            if (r.message.status === "success" && r.message.draft_result && r.message.draft_result.status === "draft_created") {
               const res = r.message.draft_result;
               const link = res.link ? `<a href="${res.link}">${res.invoice_name}</a>` : res.invoice_name;
               appendMessageUI("assistant", `
-                ✅ <b>${__('Invoice Extracted Successfully!')}</b><br><br>
-                ${res.message}<br>
+                ✅ <b>${__('Purchase Invoice Drafted Successfully!')}</b><br><br>
+                ${res.message}<br><br>
                 📄 <b>${__('Draft Document')}:</b> ${link}<br>
-                Please review quantities, rates, and taxes before submitting.
+                <i>${__('Please click the link above to review items, quantities, and submit when ready.')}</i>
+              `);
+            } else if (r.message.status === "warning") {
+              appendMessageUI("assistant", `
+                ℹ️ <b>${__('Document Analyzed')}:</b> ${r.message.file_name}<br><br>
+                ${r.message.message || __('The uploaded file does not appear to contain invoice tables or supplier details.')}<br>
+                <i>Tip: Please upload a commercial invoice, bill, or receipt containing line items.</i>
               `);
             } else {
-              appendMessageUI("assistant", "⚠️ " + __('Could not auto-extract invoice. Please verify file quality.'));
+              const err = (r.message.draft_result && r.message.draft_result.error) || r.message.message || __('Could not extract invoice.');
+              appendMessageUI("assistant", `⚠️ <b>${__('Invoice Extraction Notice')}:</b><br>${err}`);
             }
           }
         });
@@ -230,6 +259,11 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
         (data.messages || []).forEach(function (m) {
           appendMessageUI(m.role, m.content);
         });
+
+        // Ensure scrolling reaches bottom after messages load
+        setTimeout(function () {
+          area.scrollTop(area[0].scrollHeight);
+        }, 80);
       }
     });
   }
@@ -263,7 +297,13 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     const isUser = role === "user";
     const userInitial = (frappe.session.user_fullname || frappe.session.user || "U").charAt(0).toUpperCase();
     const avatar = isUser ? `<div class="chatgpt-avatar user-avatar">${userInitial}</div>` : `<div class="chatgpt-avatar ai-avatar">AI</div>`;
-    const formatted = !isUser && typeof frappe.markdown === "function" ? frappe.markdown(text) : (isUser && text.startsWith("📎") ? text : frappe.utils.escape_html(text));
+    
+    let formatted = "";
+    if (isUser) {
+      formatted = (text.startsWith("📎") || text.includes("<b>")) ? text : frappe.utils.escape_html(text);
+    } else {
+      formatted = typeof frappe.markdown === "function" ? frappe.markdown(text) : text;
+    }
 
     let actionsHtml = "";
     if (!isUser) {
@@ -383,18 +423,38 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
   container.find("#page-send-btn").on("click", () => sendPageMessage());
   container.find("#page-btn-mic").on("click", toggleListening);
   container.find("#page-btn-attach").on("click", openInvoiceUploader);
+  
+  // Morning Briefing: Instantly outputs into chat stream!
   container.find("#page-btn-briefing").on("click", function () {
     frappe.show_alert({ message: __("Generating Executive Morning Briefing..."), indicator: "blue" });
+    if (container.find(".chatgpt-starter-grid").length > 0) {
+      container.find("#page-messages-area").empty();
+    }
+    appendMessageUI("user", "🌅 " + __("Generate today's executive morning briefing."));
+
+    const loading = $(`
+      <div class="chatgpt-page-msg assistant" id="page-msg-loading">
+        <div class="chatgpt-avatar ai-avatar">AI</div>
+        <div class="chatgpt-msg-content-wrapper">
+          <div class="chatgpt-page-bubble text-muted"><em>${__('Analyzing financial positions & delayed orders...')}</em></div>
+        </div>
+      </div>
+    `).appendTo(container.find("#page-messages-area"));
+    container.find("#page-messages-area").scrollTop(container.find("#page-messages-area")[0].scrollHeight);
+
     frappe.call({
       method: "erpnext_chatgpt.api.trigger_manual_briefing",
       callback: function (r) {
-        if (r.message) {
-          frappe.msgprint({
-            title: __("🌅 Morning Briefing Dispatched"),
-            indicator: "green",
-            message: __("The briefing has been synthesized and delivered to your Notification Bell (🔔) at the top of the screen!")
-          });
+        loading.remove();
+        if (r.message && r.message.briefing_content) {
+          appendMessageUI("assistant", r.message.briefing_content);
+        } else {
+          appendMessageUI("assistant", "⚠️ " + __('Could not synthesize morning briefing.'));
         }
+      },
+      error: function () {
+        loading.remove();
+        appendMessageUI("assistant", "⚠️ " + __('Error communicating with AI service.'));
       }
     });
   });

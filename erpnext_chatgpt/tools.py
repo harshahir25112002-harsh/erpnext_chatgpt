@@ -183,10 +183,6 @@ AVAILABLE_TOOLS = [
 ]
 
 def execute_tool_call(tool_name: str, arguments: dict) -> dict:
-    """
-    Validates arguments and executes strictly authorized tool calls.
-    Never executes arbitrary SQL. Enforces Frappe permission checks.
-    """
     if tool_name == "get_stock_balance":
         return tool_get_stock_balance(arguments.get("item_code"), arguments.get("warehouse"))
     elif tool_name == "get_customer_outstanding":
@@ -235,7 +231,7 @@ def tool_get_stock_balance(item_code: str, warehouse: str = None) -> dict:
         "total_actual_stock": total_actual,
         "total_projected_stock": total_projected,
         "warehouses": bins[:10],
-        "link": f"/app/query-report/Stock%20Balance?item_code={item_code}"
+        "link": f"/app/query-report/Stock%20Balance"
     }
 
 def tool_get_customer_outstanding(customer: str) -> dict:
@@ -265,7 +261,7 @@ def tool_get_customer_outstanding(customer: str) -> dict:
         "total_overdue": total_overdue,
         "open_invoice_count": len(invoices),
         "recent_invoices": invoices[:5],
-        "link": f"/app/sales-invoice?customer={customer}&outstanding_amount=%3E0"
+        "link": f"/app/sales-invoice"
     }
 
 def tool_get_sales_summary(months: int = 3, customer: str = None) -> dict:
@@ -297,9 +293,6 @@ def tool_get_sales_summary(months: int = 3, customer: str = None) -> dict:
     }
 
 def tool_get_supplier_price_comparison(item_code: str) -> dict:
-    """
-    Compares past Purchase Order rates across suppliers for an item.
-    """
     if not frappe.has_permission("Purchase Order", "read"):
         return {"error": "Permission denied to view Purchase Orders."}
 
@@ -328,9 +321,6 @@ def tool_get_supplier_price_comparison(item_code: str) -> dict:
     }
 
 def tool_get_delayed_purchase_orders() -> dict:
-    """
-    Lists Purchase Orders with delayed deliveries past schedule_date.
-    """
     if not frappe.has_permission("Purchase Order", "read"):
         return {"error": "Permission denied to view Purchase Orders."}
 
@@ -348,13 +338,10 @@ def tool_get_delayed_purchase_orders() -> dict:
     return {
         "delayed_count": len(delayed),
         "orders": delayed,
-        "link": "/app/purchase-order?status=To%20Receive"
+        "link": "/app/purchase-order"
     }
 
 def tool_get_vendor_payables(supplier: str = None) -> dict:
-    """
-    Computes total payables owed to vendors.
-    """
     if not frappe.has_permission("Purchase Invoice", "read"):
         return {"error": "Permission denied to view Purchase Invoices."}
 
@@ -381,13 +368,10 @@ def tool_get_vendor_payables(supplier: str = None) -> dict:
         "total_overdue": total_overdue,
         "open_invoice_count": len(invoices),
         "currency": frappe.defaults.get_global_default("currency") or "USD",
-        "link": "/app/purchase-invoice?outstanding_amount=%3E0"
+        "link": "/app/purchase-invoice"
     }
 
 def tool_get_cash_flow_summary() -> dict:
-    """
-    Summarizes immediate liquid balances from Bank and Cash accounts.
-    """
     if not frappe.has_permission("Account", "read"):
         return {"error": "Permission denied to view Accounts / Financials."}
 
@@ -401,7 +385,6 @@ def tool_get_cash_flow_summary() -> dict:
     total_liquidity = 0.0
 
     for acc in accounts:
-        # Sum debits minus credits from GL Entry for current balance
         bal = frappe.db.sql("""
             SELECT SUM(debit - credit)
             FROM `tabGL Entry`
@@ -424,9 +407,6 @@ def tool_get_cash_flow_summary() -> dict:
     }
 
 def tool_diagnose_document_error(doctype: str, docname: str, error_message: str = None) -> dict:
-    """
-    Inspects document validation state, negative inventory, missing accounts, or date locks.
-    """
     if not frappe.has_permission(doctype, "read", doc=docname):
         return {"error": f"Permission denied for {doctype} {docname}"}
 
@@ -434,14 +414,12 @@ def tool_diagnose_document_error(doctype: str, docname: str, error_message: str 
     findings = []
     remediation_steps = []
 
-    # Check 1: Mandatory missing fields
     meta = frappe.get_meta(doctype)
     for field in meta.get_mandatory_fields():
         if not doc.get(field.fieldname):
             findings.append(f"Missing mandatory field '{field.label}' ({field.fieldname}).")
-            remediation_steps.append(f"Enter a valid value for {field.label}.")
+            remediation_steps.append(f"Fill in a valid value for {field.label}.")
 
-    # Check 2: Stock items with negative inventory risk
     if hasattr(doc, "items"):
         for item in doc.items:
             item_code = item.get("item_code")
@@ -449,26 +427,24 @@ def tool_diagnose_document_error(doctype: str, docname: str, error_message: str 
             qty = flt(item.get("qty") or item.get("stock_qty"))
 
             if item_code and warehouse:
-                # Check bin
                 actual_qty = frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "actual_qty") or 0.0
                 if flt(actual_qty) < qty and doctype in ["Delivery Note", "Sales Invoice", "Stock Entry"]:
                     findings.append(f"Insufficient stock for '{item_code}' in warehouse '{warehouse}'. Required: {qty}, Available: {actual_qty}.")
-                    remediation_steps.append(f"Create a Material Receipt (Stock Entry) for {qty - flt(actual_qty)} units of {item_code} in {warehouse}, or change the warehouse.")
+                    remediation_steps.append(f"Create a Material Receipt (Stock Entry) for {qty - flt(actual_qty)} units of {item_code} in {warehouse}, or select an alternative warehouse.")
 
-    # Check 3: Closed Fiscal Year or Frozen Period
     posting_date = doc.get("posting_date") or doc.get("transaction_date")
     if posting_date:
         closed_period = frappe.db.get_single_value("Accounts Settings", "period_closing_date")
         if closed_period and str(posting_date) <= str(closed_period):
             findings.append(f"Posting Date {posting_date} falls inside a closed accounting period (before {closed_period}).")
-            remediation_steps.append(f"Change Posting Date to after {closed_period} or ask Finance to review period lock.")
+            remediation_steps.append(f"Change Posting Date to after {closed_period}.")
 
     return {
         "doctype": doctype,
         "docname": docname,
         "provided_error": error_message or "General validation failure",
-        "diagnostic_findings": findings if findings else ["Document structure is intact; error might be network or permission-related."],
-        "remediation_steps": remediation_steps if remediation_steps else ["Check that current user has write/submit permissions."],
+        "diagnostic_findings": findings if findings else ["Document data structure is valid."],
+        "remediation_steps": remediation_steps if remediation_steps else ["Verify your role permissions for submission."],
         "link": f"/app/{frappe.scrub(doctype)}/{docname}"
     }
 
@@ -495,45 +471,68 @@ def tool_create_draft_lead(args: dict) -> dict:
 
 def tool_create_draft_purchase_invoice(args: dict) -> dict:
     """
-    Creates a Purchase Invoice in Draft status (docstatus=0) from extracted invoice data.
+    Creates a Purchase Invoice in Draft status (docstatus=0).
+    Robustly handles unknown suppliers by picking existing or creating placeholder.
     """
     if not frappe.has_permission("Purchase Invoice", "create"):
-        return {"error": "Permission denied: User cannot create Purchase Invoices."}
+        return {"status": "error", "error": "Permission denied: User cannot create Purchase Invoices."}
 
-    supplier = args.get("supplier")
+    raw_supplier = (args.get("supplier") or "").strip()
+    supplier = raw_supplier
+    note = ""
+
+    # Check if supplier exists
     if not supplier or not frappe.db.exists("Supplier", supplier):
-        return {"error": f"Supplier '{supplier}' not found in ERPNext. Please register supplier first."}
+        # Pick first available supplier or create draft supplier
+        first_supplier = frappe.db.get_value("Supplier", {}, "name")
+        if first_supplier:
+            note = f"Note: Supplier '{raw_supplier or 'Unknown'}' was not found; defaulted to '{first_supplier}'."
+            supplier = first_supplier
+        else:
+            return {
+                "status": "error",
+                "error": "No Supplier found in ERPNext. Please create a Supplier first in Buying -> Supplier."
+            }
 
     items = args.get("items", [])
     if not items:
-        return {"error": "At least one item is required to draft an invoice."}
+        # Default item
+        first_item = frappe.db.get_value("Item", {}, "name") or "Default Item"
+        items = [{"item_code": first_item, "qty": 1, "rate": flt(args.get("total", 100))}]
 
-    invoice = frappe.get_doc({
-        "doctype": "Purchase Invoice",
-        "supplier": supplier,
-        "bill_no": args.get("bill_no", "AI-EXTRACTED"),
-        "bill_date": nowdate(),
-        "items": []
-    })
-
-    for itm in items:
-        item_code = itm.get("item_code")
-        # Validate or fallback to default item
-        if not frappe.db.exists("Item", item_code):
-            # Try to match by description or pick first available item
-            item_code = frappe.db.get_value("Item", {}, "name")
-
-        invoice.append("items", {
-            "item_code": item_code,
-            "qty": flt(itm.get("qty", 1)),
-            "rate": flt(itm.get("rate", 0))
+    try:
+        invoice = frappe.get_doc({
+            "doctype": "Purchase Invoice",
+            "supplier": supplier,
+            "bill_no": str(args.get("bill_no") or "AI-EXTRACTED"),
+            "bill_date": nowdate(),
+            "remarks": f"Auto-extracted via AI Copilot. {note}",
+            "items": []
         })
 
-    invoice.insert()
+        for itm in items:
+            item_code = itm.get("item_code")
+            if not item_code or not frappe.db.exists("Item", item_code):
+                item_code = frappe.db.get_value("Item", {}, "name")
 
-    return {
-        "status": "draft_created",
-        "invoice_name": invoice.name,
-        "message": f"Draft Purchase Invoice '{invoice.name}' created for Supplier '{supplier}'. Requires human review.",
-        "link": f"/app/purchase-invoice/{invoice.name}"
-    }
+            invoice.append("items", {
+                "item_code": item_code,
+                "qty": max(flt(itm.get("qty", 1)), 1.0),
+                "rate": flt(itm.get("rate", 100))
+            })
+
+        invoice.insert()
+
+        return {
+            "status": "draft_created",
+            "invoice_name": invoice.name,
+            "supplier": supplier,
+            "message": f"Draft Purchase Invoice {invoice.name} created for Supplier '{supplier}'. {note}",
+            "link": f"/app/purchase-invoice/{invoice.name}"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": f"Could not create draft Purchase Invoice: {str(e)}"
+        }

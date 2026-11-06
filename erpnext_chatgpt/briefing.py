@@ -3,19 +3,13 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate, get_url
+from frappe.utils import flt, nowdate
 from erpnext_chatgpt.providers import execute_chat_completion
 
-def send_daily_executive_briefing():
+def generate_briefing_content():
     """
-    Automated daily 9:00 AM Cron Task.
-    Aggregates financial positions, overdue collections, delayed POs, and open issues,
-    synthesizes a high-level briefing via AI, and delivers native notifications.
+    Synthesizes current ERP operational metrics into a clean executive morning summary.
     """
-    settings = frappe.get_single("AI Settings")
-    if not settings.enabled or settings.site_disabled:
-        return
-
     today = nowdate()
 
     # 1. Collections Expected
@@ -51,7 +45,6 @@ def send_daily_executive_briefing():
 
     currency = frappe.defaults.get_global_default("currency") or "USD"
 
-    # Context for AI synthesis
     stats_text = (
         f"Date: {today}\n"
         f"- Overdue Customer Receivables: {currency} {rec_total:,.2f} ({rec_count} invoices)\n"
@@ -63,25 +56,38 @@ def send_daily_executive_briefing():
     prompt = (
         "You are an executive Chief of Staff. Synthesize this raw ERP operational data "
         "into a crisp, 4-bullet executive morning briefing with actionable priority recommendations. "
-        "Keep it professional, direct, and under 120 words.\n\n"
+        "Include clickable markdown links formatted as [Label](/app/slug).\n"
+        "For receivables use [Review Overdue Receivables](/app/sales-invoice?outstanding_amount=>0).\n"
+        "For payables use [Review Payables](/app/purchase-invoice?outstanding_amount=>0).\n"
+        "For delayed POs use [View Delayed POs](/app/purchase-order?status=To%20Receive).\n"
+        "Keep it professional, direct, and under 130 words.\n\n"
         f"{stats_text}"
     )
 
-    try:
-        messages = [
-            {"role": "system", "content": "You are a concise executive advisor for ERPNext leadership."},
-            {"role": "user", "content": prompt}
-        ]
-        res = execute_chat_completion(messages, model_override=None)
-        ai_briefing = res.get("content", stats_text)
+    messages = [
+        {"role": "system", "content": "You are a concise executive advisor for ERPNext leadership."},
+        {"role": "user", "content": prompt}
+    ]
+    res = execute_chat_completion(messages, model_override=None)
+    return res.get("content", stats_text)
 
-        # Deliver to System Managers via Frappe Notification Log
+def send_daily_executive_briefing():
+    """
+    Automated daily 9:00 AM Cron Task.
+    """
+    settings = frappe.get_single("AI Settings")
+    if not settings.enabled or settings.site_disabled:
+        return
+
+    today = nowdate()
+    try:
+        ai_briefing = generate_briefing_content()
+
         recipients = frappe.get_all(
             "Has Role",
             filters={"role": "System Manager", "parenttype": "User"},
             pluck="parent"
         )
-        # Deduplicate and filter active users
         active_recipients = frappe.get_all(
             "User",
             filters={"name": ["in", list(set(recipients))], "enabled": 1},
@@ -90,12 +96,13 @@ def send_daily_executive_briefing():
 
         for user in active_recipients:
             doc = frappe.new_doc("Notification Log")
-            doc.subject = _("🌅 AI Morning Executive Briefing ({0})").format(today)
+            doc.subject = _("🌅 AI Morning Briefing ({0})").format(today)
             doc.for_user = user
             doc.type = "Alert"
             doc.email_content = ai_briefing
-            doc.document_type = "AI Settings"
-            doc.document_name = "AI Settings"
+            # Open directly in AI Copilot page instead of AI Settings
+            doc.document_type = "Page"
+            doc.document_name = "chatgpt_copilot"
             doc.insert(ignore_permissions=True)
 
         frappe.db.commit()
