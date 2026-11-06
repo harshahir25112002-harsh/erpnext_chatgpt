@@ -17,9 +17,9 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
       <p class="text-muted" style="font-size: 13.5px;">${__('Ask questions, check live stock & balances, diagnose errors, or speak with voice.')}</p>
     </div>
     <div class="chatgpt-starter-grid">
-      <div class="chatgpt-prompt-card" data-prompt="Show me my current stock balance across warehouses.">
-        <strong>📦 ${__('Check Stock Balance')}</strong>
-        <span>${__('Query warehouse quantities & projected stock.')}</span>
+      <div class="chatgpt-prompt-card" data-prompt="Show all available items and their current warehouse stock balance.">
+        <strong>📦 ${__('Check Items & Stock')}</strong>
+        <span>${__('Query all registered items and live warehouse quantities.')}</span>
       </div>
       <div class="chatgpt-prompt-card" data-prompt="Show all unpaid sales invoices and total overdue customer balance.">
         <strong>💳 ${__('Customer Outstanding')}</strong>

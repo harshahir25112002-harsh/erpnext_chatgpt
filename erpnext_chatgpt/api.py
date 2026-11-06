@@ -110,14 +110,48 @@ def _process_chat(user, message, conversation_id=None, reference_doctype=None, r
     messages = []
     sys_prompt = (
         (settings.global_system_prompt or "You are an intelligent ERPNext Copilot.") +
-        "\nIMPORTANT GUIDELINES FOR RESPONSES:\n"
-        "1. When reporting records (invoices, orders, stock, items), format them as clear, well-structured Markdown tables.\n"
-        "2. For every record name in tables or text, use the exact relative link from tool results, formatted strictly as [DocName](/app/doctype-slug/DocName) e.g. [PINV-26-00016](/app/purchase-invoice/PINV-26-00016).\n"
-        "3. NEVER include protocol, domain, '/desk', or '#' in links (e.g. NEVER output https://... or /desk/... or #/app/...). Use ONLY relative links starting with /app/.\n"
-        "4. Never guess item codes or series; always use live tool results.\n"
-        "5. Always present clean, actionable summaries with direct links."
+        "\n=======================================================\n"
+        "CRITICAL ANTI-HALLUCINATION & ZERO-FICTION DIRECTIVE:\n"
+        "1. You are connected directly to a LIVE PRODUCTION ERPNext database.\n"
+        "2. UNDER NO CIRCUMSTANCES should you ever invent or fabricate dummy items, dummy codes, or dummy stock.\n"
+        "3. NEVER use placeholder names like 'Widget A', 'Gadget B', 'Tool C', 'ITEM-001', 'ITEM-002', etc.\n"
+        "4. ONLY report real items, real prices, and real stock balances from the LIVE ERP DATA provided or tool results.\n"
+        "5. If an item does not exist or if the system has no items, state truthfully:\n"
+        "   'This item does not exist in your ERPNext system.'\n"
+        "6. When reporting records (invoices, items, stock, orders), format them in a clean Markdown table with their exact names and links.\n"
+        "7. For every record name, use the exact relative link from tool results: [DocName](/app/doctype-slug/DocName) e.g. [PINV-26-00016](/app/purchase-invoice/PINV-26-00016).\n"
+        "8. NEVER include domain, '/desk', or '#' in links. Use ONLY clean relative links starting with /app/.\n"
+        "=======================================================\n"
     )
     messages.append({"role": "system", "content": sys_prompt})
+
+    # Proactive Live ERP Data Injection based on User Intent (Eliminates dummy hallucinated items)
+    msg_lower = (message or "").lower()
+    from erpnext_chatgpt.tools import (
+        tool_get_items_and_stock,
+        tool_get_stock_balance,
+        tool_get_vendor_payables,
+        tool_get_customer_outstanding
+    )
+
+    if any(k in msg_lower for k in ["item", "stock", "inventory", "product", "material", "balance"]):
+        try:
+            live_items = tool_get_items_and_stock(limit=15)
+            messages.append({
+                "role": "system",
+                "content": f"[LIVE ERP DATA - REAL ITEMS & STOCK IN SYSTEM]:\n{json.dumps(live_items, default=str)}\nNOTE: Use ONLY the above real records. Do not invent any dummy items."
+            })
+        except Exception:
+            pass
+    elif any(k in msg_lower for k in ["payable", "payables", "vendor due", "supplier balance", "unpaid bill"]):
+        try:
+            live_payables = tool_get_vendor_payables()
+            messages.append({
+                "role": "system",
+                "content": f"[LIVE ERP DATA - REAL VENDOR PAYABLES]:\n{json.dumps(live_payables, default=str)}"
+            })
+        except Exception:
+            pass
 
     if reference_doctype and reference_name:
         sanitized_doc = sanitize_doc_for_llm(reference_doctype, reference_name)

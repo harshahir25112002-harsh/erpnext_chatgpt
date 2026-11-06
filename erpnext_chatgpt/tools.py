@@ -28,15 +28,29 @@ AVAILABLE_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_stock_balance",
-            "description": "Get real-time stock balance for an item across warehouses by code or item name.",
+            "name": "get_items_and_stock",
+            "description": "Fetch real Item master records and live warehouse stock quantities from the ERPNext database. Always use this whenever the user asks for available items, inventory, or stock list.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "item_code": { "type": "string", "description": "Item Code or Item Name" },
+                    "search_term": { "type": "string", "description": "Optional search query for item code or name" },
+                    "item_group": { "type": "string", "description": "Optional item group filter" },
+                    "limit": { "type": "integer", "description": "Max items to return (default: 15)" }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_stock_balance",
+            "description": "Get real-time stock balance across warehouses for a specific item or all items.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_code": { "type": "string", "description": "Optional Item Code or Item Name. If omitted, returns live stock balance across all items." },
                     "warehouse": { "type": "string", "description": "Optional specific warehouse" }
-                },
-                "required": ["item_code"]
+                }
             }
         }
     },
@@ -154,6 +168,8 @@ AVAILABLE_TOOLS = [
 def execute_tool_call(tool_name: str, arguments: dict) -> dict:
     if tool_name == "search_erp_records":
         return tool_search_erp_records(arguments.get("doctype"), arguments.get("search_term"), arguments.get("filters"), arguments.get("limit", 5))
+    elif tool_name == "get_items_and_stock":
+        return tool_get_items_and_stock(arguments.get("search_term"), arguments.get("item_group"), arguments.get("limit", 15))
     elif tool_name == "get_stock_balance":
         return tool_get_stock_balance(arguments.get("item_code"), arguments.get("warehouse"))
     elif tool_name == "get_customer_outstanding":
@@ -229,23 +245,143 @@ def tool_search_erp_records(doctype: str, search_term: str = None, custom_filter
         "link": f"/app/{frappe.scrub(doctype)}{filter_param}"
     }
 
-def tool_get_stock_balance(item_code: str, warehouse: str = None) -> dict:
+def tool_get_items_and_stock(search_term: str = None, item_group: str = None, limit: int = 15) -> dict:
+    """
+    Fetches real Item master records from ERPNext along with live stock balances (tabBin).
+    """
+    if not frappe.has_permission("Item", "read"):
+        return {"error": "Permission denied to view Items."}
+
+    filters = {"disabled": 0}
+    if item_group:
+        filters["item_group"] = item_group
+
+    or_filters = {}
+    if search_term and search_term.strip():
+        st = search_term.strip()
+        or_filters = {
+            "name": ["like", f"%{st}%"],
+            "item_name": ["like", f"%{st}%"],
+            "item_group": ["like", f"%{st}%"]
+        }
+
+    items = frappe.get_all(
+        "Item",
+        filters=filters,
+        or_filters=or_filters if or_filters else None,
+        fields=["name", "item_name", "item_group", "stock_uom", "is_stock_item", "standard_rate", "valuation_rate"],
+        limit_page_length=limit or 15,
+        order_by="modified desc"
+    )
+
+    total_count = frappe.db.count("Item", {"disabled": 0})
+
+    if not items:
+        return {
+            "count": 0,
+            "total_items_in_system": total_count,
+            "items": [],
+            "message": "No items found in your ERPNext system. You can create items in ERPNext or upload an invoice to auto-create them.",
+            "link": "/app/item"
+        }
+
+    # Fetch live Bin stock for these items
+    item_codes = [itm.name for itm in items]
+    bin_data = {}
+    if frappe.has_permission("Bin", "read") and item_codes:
+        bins = frappe.db.sql("""
+            SELECT item_code, SUM(actual_qty) as total_qty, SUM(reserved_qty) as total_reserved
+            FROM `tabBin`
+            WHERE item_code IN %s
+            GROUP BY item_code
+        """, (tuple(item_codes),), as_dict=True)
+        for b in bins:
+            bin_data[b.item_code] = {
+                "actual_qty": flt(b.total_qty),
+                "reserved_qty": flt(b.total_reserved)
+            }
+
+    formatted_items = []
+    for itm in items:
+        b_info = bin_data.get(itm.name, {"actual_qty": 0.0, "reserved_qty": 0.0})
+        formatted_items.append({
+            "item_code": itm.name,
+            "item_name": itm.item_name or itm.name,
+            "item_group": itm.item_group,
+            "stock_uom": itm.stock_uom or "Nos",
+            "is_stock_item": itm.is_stock_item,
+            "current_stock": b_info["actual_qty"],
+            "reserved_stock": b_info["reserved_qty"],
+            "rate": flt(itm.standard_rate or itm.valuation_rate or 0.0),
+            "link": f"/app/item/{itm.name}"
+        })
+
+    return {
+        "count": len(formatted_items),
+        "total_items_in_system": total_count,
+        "items": formatted_items,
+        "link": "/app/item"
+    }
+
+def tool_get_stock_balance(item_code: str = None, warehouse: str = None) -> dict:
     if not frappe.has_permission("Bin", "read"):
         return {"error": "Permission denied to view Stock Balance."}
 
-    # Dynamic fuzzy resolution: if item_code is not exact match, search by item_name
-    real_item_code = item_code
-    if not frappe.db.exists("Item", item_code):
-        matched = frappe.db.get_value("Item", {"item_name": ["like", f"%{item_code}%"]}, "name")
+    # Case 1: General stock balance check across all items & warehouses
+    if not item_code or not item_code.strip():
+        filters = {}
+        if warehouse:
+            filters["warehouse"] = warehouse
+
+        bins = frappe.get_all(
+            "Bin",
+            filters=filters,
+            fields=["item_code", "warehouse", "actual_qty", "reserved_qty", "projected_qty"],
+            order_by="actual_qty desc",
+            limit_page_length=20
+        )
+
+        if not bins:
+            return {
+                "total_items_with_stock": 0,
+                "message": "No stock records found in your ERPNext warehouses.",
+                "bins": [],
+                "link": "/app/query-report/Stock%20Balance"
+            }
+
+        result = []
+        for b in bins:
+            item_name = frappe.db.get_value("Item", b.item_code, "item_name") or b.item_code
+            result.append({
+                "item_code": b.item_code,
+                "item_name": item_name,
+                "warehouse": b.warehouse,
+                "actual_qty": flt(b.actual_qty),
+                "reserved_qty": flt(b.reserved_qty),
+                "link": f"/app/item/{b.item_code}"
+            })
+
+        return {
+            "total_records": len(result),
+            "stock_balances": result,
+            "link": "/app/query-report/Stock%20Balance"
+        }
+
+    # Case 2: Specific item stock balance
+    real_item_code = item_code.strip()
+    if not frappe.db.exists("Item", real_item_code):
+        matched = frappe.db.get_value("Item", {"item_name": ["like", f"%{real_item_code}%"]}, "name")
         if matched:
             real_item_code = matched
         else:
-            # Return list of top available items
             sample_items = frappe.get_all("Item", limit=5, fields=["name", "item_name", "item_group"])
+            for si in sample_items:
+                si["link"] = f"/app/item/{si.name}"
             return {
-                "error": f"Item '{item_code}' not found.",
-                "available_items_sample": sample_items,
-                "hint": "Please choose from the items above."
+                "error": f"Item '{item_code}' does not exist in your ERPNext system.",
+                "exists": False,
+                "available_items_in_system": sample_items,
+                "message": f"Item '{item_code}' was not found. Please select from existing items above or create it."
             }
 
     filters = {"item_code": real_item_code}
