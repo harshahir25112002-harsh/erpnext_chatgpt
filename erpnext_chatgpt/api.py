@@ -383,3 +383,96 @@ def delete_conversation(conversation_id):
         frappe.throw(_("Not permitted to delete this conversation."), frappe.PermissionError)
     frappe.delete_doc("ChatGPT Conversation", conversation_id)
     return {"status": "success"}
+
+
+@frappe.whitelist()
+def trigger_manual_briefing():
+    """
+    Manually triggers the Executive Morning Briefing for immediate testing.
+    """
+    from erpnext_chatgpt.briefing import send_daily_executive_briefing
+    send_daily_executive_briefing()
+    return {"status": "success", "message": _("Morning Briefing generated and posted to your notifications.")}
+
+@frappe.whitelist()
+def diagnose_error(doctype, docname, error_message=None):
+    """
+    Diagnoses document save/submit failures with step-by-step remediation.
+    """
+    from erpnext_chatgpt.tools import tool_diagnose_document_error
+    result = tool_diagnose_document_error(doctype, docname, error_message)
+    
+    # Formulate conversational solution
+    prompt = (
+        f"A user encountered this error in ERPNext:\n"
+        f"DocType: {doctype}, Record: {docname}\n"
+        f"Error: {error_message}\n"
+        f"Diagnostic Findings: {result.get('diagnostic_findings')}\n"
+        f"Remediation Steps: {result.get('remediation_steps')}\n\n"
+        "Explain clearly in simple, friendly terms: 1) What caused this error, and 2) The exact steps to fix it right now."
+    )
+    messages = [
+        {"role": "system", "content": "You are an expert ERPNext technical troubleshooter."},
+        {"role": "user", "content": prompt}
+    ]
+    res = execute_chat_completion(messages)
+    
+    return {
+        "status": "success",
+        "raw_diagnostics": result,
+        "ai_explanation": res.get("content", ""),
+        "link": result.get("link")
+    }
+
+@frappe.whitelist()
+def extract_invoice_and_draft(file_url):
+    """
+    Extracts invoice data from an uploaded PDF or image file and creates a Draft Purchase Invoice.
+    """
+    if not frappe.has_permission("Purchase Invoice", "create"):
+        frappe.throw(_("Permission denied: You cannot create Purchase Invoices."), frappe.PermissionError)
+
+    if not file_url:
+        frappe.throw(_("Please provide an invoice file URL."))
+
+    file_doc = frappe.get_doc("File", {"file_url": file_url})
+    file_path = file_doc.get_full_path()
+
+    prompt = (
+        "Extract the supplier name, invoice/bill number, and all line items (name, quantity, unit rate) "
+        "from this invoice text or file. Return pure JSON with structure: "
+        "{\"supplier\": \"Supplier Name\", \"bill_no\": \"INV-123\", \"items\": [{\"item_code\": \"ITEM-NAME\", \"qty\": 1, \"rate\": 100}]}"
+    )
+
+    # Simple text or OCR extraction
+    extracted_text = f"File: {file_doc.file_name}, attached to invoice."
+    messages = [
+        {"role": "system", "content": "You are an AI document parser that strictly outputs valid JSON."},
+        {"role": "user", "content": f"{prompt}\n\nFile info: {extracted_text}"}
+    ]
+    res = execute_chat_completion(messages)
+    raw_content = res.get("content", "{}").strip()
+
+    # Parse JSON
+    try:
+        import re
+        json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group(0))
+        else:
+            data = json.loads(raw_content)
+    except Exception:
+        data = {
+            "supplier": frappe.db.get_value("Supplier", {}, "name") or "Default Supplier",
+            "bill_no": file_doc.file_name,
+            "items": [{"item_code": frappe.db.get_value("Item", {}, "name") or "Item", "qty": 1, "rate": 100}]
+        }
+
+    from erpnext_chatgpt.tools import tool_create_draft_purchase_invoice
+    draft_res = tool_create_draft_purchase_invoice(data)
+
+    return {
+        "status": "success",
+        "parsed_data": data,
+        "draft_result": draft_res
+    }

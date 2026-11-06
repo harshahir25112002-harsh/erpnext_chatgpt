@@ -12,3 +12,4 @@ def execute():
                 frappe.delete_doc("DocType", dt, ignore_permissions=True, force=True)
             except Exception as e:
                 frappe.log_error(title=f"Could not delete legacy DocType {dt}", message=str(e))
+
