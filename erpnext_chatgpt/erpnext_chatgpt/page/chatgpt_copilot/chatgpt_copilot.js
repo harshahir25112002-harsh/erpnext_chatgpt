@@ -1,4 +1,4 @@
-// Dedicated Full-Page AI Copilot 3.1 (Robust Routing, Clean File Parsing, Smooth Scrolling)
+// Dedicated Full-Page AI Copilot (Version-Agnostic v15/v16/v17, Filtered Routing & Invoice Confirmation)
 frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
   var page = frappe.ui.make_app_page({
     parent: wrapper,
@@ -17,27 +17,27 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
       <p class="text-muted" style="font-size: 13.5px;">${__('Ask questions, check live stock & balances, diagnose errors, or speak with voice.')}</p>
     </div>
     <div class="chatgpt-starter-grid">
-      <div class="chatgpt-prompt-card" data-prompt="What is the current stock balance and available quantity for item ITEM-001?">
-        <strong>📦 ${__('Check Item Stock')}</strong>
+      <div class="chatgpt-prompt-card" data-prompt="Show me my current stock balance across warehouses.">
+        <strong>📦 ${__('Check Stock Balance')}</strong>
         <span>${__('Query warehouse quantities & projected stock.')}</span>
       </div>
-      <div class="chatgpt-prompt-card" data-prompt="What is the total outstanding balance and overdue amount for customer?">
+      <div class="chatgpt-prompt-card" data-prompt="Show all unpaid sales invoices and total overdue customer balance.">
         <strong>💳 ${__('Customer Outstanding')}</strong>
         <span>${__('Review unpaid invoices & overdue amounts.')}</span>
       </div>
-      <div class="chatgpt-prompt-card" data-prompt="Which supplier gives the lowest price for item ITEM-001 based on past purchase orders?">
+      <div class="chatgpt-prompt-card" data-prompt="Which supplier gives the lowest price based on past purchase orders?">
         <strong>🏭 ${__('Supplier Price Comparison')}</strong>
-        <span>${__('Find the cheapest vendor from PO history.')}</span>
+        <span>${__('Find the cheapest vendor from purchase history.')}</span>
       </div>
       <div class="chatgpt-prompt-card" data-prompt="Show all delayed Purchase Orders that have passed their expected delivery date.">
         <strong>⏳ ${__('Delayed Purchase Orders')}</strong>
         <span>${__('Track overdue deliveries from suppliers.')}</span>
       </div>
-      <div class="chatgpt-prompt-card" data-prompt="What is our total vendor payables and money owed to suppliers right now?">
+      <div class="chatgpt-prompt-card" data-prompt="What are our total vendor payables and current liquid bank balances?">
         <strong>💰 ${__('Vendor Payables & Cash Flow')}</strong>
         <span>${__('Summarize unpaid bills & bank liquidity.')}</span>
       </div>
-      <div class="chatgpt-prompt-card" data-prompt="Diagnose why Sales Invoice SINV-0001 is giving an error on submit.">
+      <div class="chatgpt-prompt-card" data-prompt="Diagnose validation errors on my recent documents.">
         <strong>🛠️ ${__('Error Diagnoser')}</strong>
         <span>${__('Inspect document validation & get step-by-step fix.')}</span>
       </div>
@@ -70,7 +70,7 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
         </div>
         <div class="chatgpt-page-input-wrapper">
           <div class="chatgpt-page-input-box">
-            <button class="chatgpt-icon-input-btn" id="page-btn-attach" title="${__('Attach Invoice PDF/Image to auto-extract')}">📎</button>
+            <button class="chatgpt-icon-input-btn" id="page-btn-attach" title="${__('Attach Invoice PDF/Image')}">📎</button>
             <button class="chatgpt-icon-input-btn" id="page-btn-mic" title="${__('Voice Input (Speak in English, Hindi, etc.)')}">🎙️</button>
             <textarea id="page-input-field" placeholder="${__('Ask a question or speak... (Enter to send, Shift+Enter for new line)')}"></textarea>
             <button class="chatgpt-page-send-btn" id="page-send-btn" title="${__('Send')}">
@@ -85,23 +85,39 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     </div>
   `).appendTo(page.main);
 
-  // Global Link Interceptor: makes EVERY /app/... link in the chat open smoothly in Frappe Desk!
+  // Global Filtered Link Interceptor for Frappe v15, v16, v17
   container.on("click", ".chatgpt-page-bubble a", function (e) {
-    const href = $(this).attr("href");
-    if (href && (href.startsWith("/app") || href.startsWith("app/"))) {
+    const rawHref = $(this).attr("href");
+    if (!rawHref) return;
+
+    if (rawHref.includes("/app/") || rawHref.startsWith("app/")) {
       e.preventDefault();
-      const rawRoute = href.replace(/^\/?app\/?/, "");
-      // Split route and query parameters
-      const parts = rawRoute.split("?")[0].split("/").filter(Boolean);
-      if (parts.length > 0) {
-        frappe.set_route(parts);
+      try {
+        const urlObj = new URL(rawHref, window.location.origin);
+        const pathParts = urlObj.pathname.replace(/^\/?app\/?/, "").split("/").filter(Boolean);
+        
+        // Pass query parameters to Frappe's route options so filters apply!
+        const routeOptions = {};
+        urlObj.searchParams.forEach(function (val, key) {
+          routeOptions[key] = val;
+        });
+
+        frappe.route_options = routeOptions;
+        frappe.set_route(pathParts);
+      } catch (err) {
+        window.location.href = rawHref;
       }
     }
   });
 
-  // Initialize Speech Recognition
-  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  // Voice Input (Speech Recognition with Permission Handling)
+  function setupSpeechRecognition() {
     const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechAPI) {
+      container.find("#page-btn-mic").attr("title", __("Speech recognition not supported in this browser.")).css("opacity", 0.4);
+      return;
+    }
+
     speechRecognizer = new SpeechAPI();
     speechRecognizer.continuous = false;
     speechRecognizer.interimResults = false;
@@ -110,7 +126,7 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     speechRecognizer.onstart = function () {
       isListening = true;
       container.find("#page-btn-mic").addClass("is-recording").attr("title", __("Listening... Speak now"));
-      frappe.show_alert({ message: __("🎙️ Listening... Speak your question now"), indicator: "blue" });
+      frappe.show_alert({ message: __("🎙️ Microphone active... Speak your question now"), indicator: "blue" });
     };
 
     speechRecognizer.onresult = function (event) {
@@ -120,27 +136,46 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
       input.val(current ? current + " " + transcript : transcript).focus();
     };
 
-    speechRecognizer.onerror = function () {
+    speechRecognizer.onerror = function (event) {
       stopListening();
+      if (event.error === "not-allowed" || event.error === "permission-denied") {
+        frappe.msgprint({
+          title: __("Microphone Permission Required"),
+          indicator: "orange",
+          message: __("Please allow microphone access in your browser address bar to use voice input.")
+        });
+      } else if (event.error !== "no-speech") {
+        frappe.show_alert({ message: __("Voice error: {0}", [event.error]), indicator: "orange" });
+      }
     };
 
     speechRecognizer.onend = function () {
       stopListening();
     };
-  } else {
-    container.find("#page-btn-mic").hide();
   }
 
   function toggleListening() {
+    if (!speechRecognizer) {
+      setupSpeechRecognition();
+    }
     if (!speechRecognizer) return;
+
     if (isListening) {
       speechRecognizer.stop();
       stopListening();
     } else {
-      try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(function () {
+          speechRecognizer.start();
+        }).catch(function () {
+          frappe.msgprint({
+            title: __("Microphone Blocked"),
+            indicator: "red",
+            message: __("Please click the lock/settings icon in your browser address bar and allow Microphone access.")
+          });
+        });
+      } else {
         speechRecognizer.start();
-      } catch (e) {
-        stopListening();
       }
     }
   }
@@ -150,7 +185,7 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     container.find("#page-btn-mic").removeClass("is-recording").attr("title", __("Voice Input"));
   }
 
-  // Invoice File Upload & Extraction
+  // Invoice File Upload with Interactive Confirmation Card
   function openInvoiceUploader() {
     new frappe.ui.FileUploader({
       allow_multiple: false,
@@ -168,31 +203,74 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
           method: "erpnext_chatgpt.api.extract_invoice_and_draft",
           args: { file_url: file_doc.file_url },
           freeze: true,
-          freeze_message: __("Analyzing file and drafting Purchase Invoice..."),
+          freeze_message: __("Analyzing file..."),
           callback: function (r) {
             if (!r.message) {
               appendMessageUI("assistant", "⚠️ " + __('No response from document extractor.'));
               return;
             }
 
-            if (r.message.status === "success" && r.message.draft_result && r.message.draft_result.status === "draft_created") {
-              const res = r.message.draft_result;
-              const link = res.link ? `<a href="${res.link}">${res.invoice_name}</a>` : res.invoice_name;
-              appendMessageUI("assistant", `
-                ✅ <b>${__('Purchase Invoice Drafted Successfully!')}</b><br><br>
-                ${res.message}<br><br>
-                📄 <b>${__('Draft Document')}:</b> ${link}<br>
-                <i>${__('Please click the link above to review items, quantities, and submit when ready.')}</i>
-              `);
+            if (r.message.status === "preview_ready") {
+              const data = r.message.parsed_data;
+              const items = data.items || [];
+              let itemsRows = items.map(it => `
+                <tr>
+                  <td>${frappe.utils.escape_html(it.item_code || 'Item')}</td>
+                  <td style="text-align: right;">${it.qty || 1}</td>
+                  <td style="text-align: right;">${it.rate || 0}</td>
+                </tr>
+              `).join('');
+
+              const previewHtml = `
+                <div style="background: var(--card-bg, #fff); border: 1px solid var(--border-color, #cbd5e1); border-radius: 8px; padding: 14px; margin-top: 6px;">
+                  <h5 style="margin-top: 0; margin-bottom: 8px; font-weight: 600;">📄 ${__('Invoice Preview')} (${file_doc.file_name})</h5>
+                  <div style="display: flex; gap: 20px; font-size: 13px; margin-bottom: 10px;">
+                    <div><b>${__('Supplier')}:</b> ${frappe.utils.escape_html(data.supplier || 'Unknown')}</div>
+                    <div><b>${__('Bill No')}:</b> ${frappe.utils.escape_html(data.bill_no || 'N/A')}</div>
+                    <div><b>${__('Estimated Total')}:</b> ${data.total || 'Calculated on submit'}</div>
+                  </div>
+                  <table class="table table-bordered table-sm" style="font-size: 12px; margin-bottom: 12px;">
+                    <thead><tr><th>Item</th><th style="text-align: right;">Qty</th><th style="text-align: right;">Rate</th></tr></thead>
+                    <tbody>${itemsRows}</tbody>
+                  </table>
+                  <button class="btn btn-primary btn-sm confirm-draft-btn" data-json="${frappe.utils.escape_html(JSON.stringify(data))}">
+                    ✓ ${__('Confirm & Create Draft Purchase Invoice')}
+                  </button>
+                </div>
+              `;
+              appendMessageUI("assistant", previewHtml);
+
+              // Wire confirmation action
+              container.find(".confirm-draft-btn").last().on("click", function () {
+                const btn = $(this);
+                btn.prop("disabled", true).text(__("Creating Draft..."));
+                const parsedPayload = JSON.parse(btn.attr("data-json"));
+
+                frappe.call({
+                  method: "erpnext_chatgpt.api.confirm_and_create_draft_invoice",
+                  args: { parsed_data: parsedPayload },
+                  callback: function (res) {
+                    if (res.message && res.message.status === "draft_created") {
+                      btn.replaceWith(`
+                        <div style="color: #10a37f; font-weight: 600; margin-top: 8px;">
+                          ✓ ${res.message.message} <br>
+                          <a href="${res.message.link}" style="color: #0284c7; text-decoration: underline;">${__('Open Draft')} ${res.message.invoice_name}</a>
+                        </div>
+                      `);
+                    } else {
+                      btn.prop("disabled", false).text(__("Retry"));
+                      frappe.msgprint(res.message ? res.message.error : __("Failed to create draft invoice."));
+                    }
+                  }
+                });
+              });
+
             } else if (r.message.status === "warning") {
               appendMessageUI("assistant", `
                 ℹ️ <b>${__('Document Analyzed')}:</b> ${r.message.file_name}<br><br>
-                ${r.message.message || __('The uploaded file does not appear to contain invoice tables or supplier details.')}<br>
-                <i>Tip: Please upload a commercial invoice, bill, or receipt containing line items.</i>
+                ${r.message.message}<br>
+                <i>Tip: Please upload a commercial invoice or bill with line items.</i>
               `);
-            } else {
-              const err = (r.message.draft_result && r.message.draft_result.error) || r.message.message || __('Could not extract invoice.');
-              appendMessageUI("assistant", `⚠️ <b>${__('Invoice Extraction Notice')}:</b><br>${err}`);
             }
           }
         });
@@ -260,7 +338,6 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
           appendMessageUI(m.role, m.content);
         });
 
-        // Ensure scrolling reaches bottom after messages load
         setTimeout(function () {
           area.scrollTop(area[0].scrollHeight);
         }, 80);
@@ -424,7 +501,7 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
   container.find("#page-btn-mic").on("click", toggleListening);
   container.find("#page-btn-attach").on("click", openInvoiceUploader);
   
-  // Morning Briefing: Instantly outputs into chat stream!
+  // Morning Briefing: Streams directly into chat!
   container.find("#page-btn-briefing").on("click", function () {
     frappe.show_alert({ message: __("Generating Executive Morning Briefing..."), indicator: "blue" });
     if (container.find(".chatgpt-starter-grid").length > 0) {
@@ -466,6 +543,7 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     }
   });
 
+  setupSpeechRecognition();
   bindStarterCards();
   loadConversations();
 

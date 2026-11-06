@@ -19,9 +19,6 @@ from erpnext_chatgpt.providers import (
 )
 
 def log_ai_request(user, status, provider, model, prompt, response, usage, cost, latency, ref_dt=None, ref_dn=None, error=None):
-    """
-    Persists audit trail and token analytics strictly in AI Request Log.
-    """
     try:
         log_doc = frappe.get_doc({
             "doctype": "AI Request Log",
@@ -113,11 +110,11 @@ def _process_chat(user, message, conversation_id=None, reference_doctype=None, r
     messages = []
     sys_prompt = (
         (settings.global_system_prompt or "You are an intelligent ERPNext Copilot.") +
-        "\nIMPORTANT: When mentioning ERPNext forms or reports, always format them as clickable Markdown links using relative paths like:\n"
-        "- [Sales Invoices](/app/sales-invoice)\n"
-        "- [Purchase Orders](/app/purchase-order)\n"
-        "- [Stock Balance Report](/app/query-report/Stock%20Balance)\n"
-        "- [General Ledger](/app/query-report/General%20Ledger)\n"
+        "\nIMPORTANT GUIDELINES FOR RESPONSES:\n"
+        "1. When reporting records (invoices, orders, stock, items), format them as clear Markdown tables.\n"
+        "2. Include clickable relative links formatted as [Record Name](/app/slug/name) or [Filter List](/app/slug?key=value).\n"
+        "3. Never guess item codes or invoice series; use live tool results.\n"
+        "4. Always present a clean, concise breakdown with actionable steps."
     )
     messages.append({"role": "system", "content": sys_prompt})
 
@@ -345,9 +342,6 @@ def delete_conversation(conversation_id):
 
 @frappe.whitelist()
 def trigger_manual_briefing():
-    """
-    Manually triggers the Executive Morning Briefing and returns content for immediate display.
-    """
     from erpnext_chatgpt.briefing import generate_briefing_content, send_daily_executive_briefing
     content = generate_briefing_content()
     send_daily_executive_briefing()
@@ -358,20 +352,17 @@ def trigger_manual_briefing():
     }
 
 @frappe.whitelist()
-def diagnose_error(doctype, docname, error_message=None):
-    """
-    Diagnoses document save/submit failures with step-by-step remediation.
-    """
+def diagnose_error(doctype, docname=None, error_message=None):
     from erpnext_chatgpt.tools import tool_diagnose_document_error
     result = tool_diagnose_document_error(doctype, docname, error_message)
     
     prompt = (
         f"A user encountered this error in ERPNext:\n"
-        f"DocType: {doctype}, Record: {docname}\n"
-        f"Error: {error_message}\n"
+        f"DocType: {doctype}, Record: {result.get('docname')}\n"
+        f"Error: {error_message or 'Submission Validation Failed'}\n"
         f"Diagnostic Findings: {result.get('diagnostic_findings')}\n"
         f"Remediation Steps: {result.get('remediation_steps')}\n\n"
-        "Explain clearly in simple, friendly terms: 1) What caused this error, and 2) The exact steps to fix it right now. Include clickable markdown links if appropriate."
+        "Explain clearly: 1) Exactly what caused this issue, and 2) Direct instructions on how to solve it."
     )
     messages = [
         {"role": "system", "content": "You are an expert ERPNext technical troubleshooter."},
@@ -381,6 +372,7 @@ def diagnose_error(doctype, docname, error_message=None):
     
     return {
         "status": "success",
+        "docname": result.get("docname"),
         "raw_diagnostics": result,
         "ai_explanation": res.get("content", ""),
         "link": result.get("link")
@@ -389,7 +381,7 @@ def diagnose_error(doctype, docname, error_message=None):
 @frappe.whitelist()
 def extract_invoice_and_draft(file_url):
     """
-    Extracts invoice data from an uploaded file and creates a Draft Purchase Invoice.
+    Parses an uploaded invoice and returns a structured preview for user confirmation.
     """
     if not frappe.has_permission("Purchase Invoice", "create"):
         frappe.throw(_("Permission denied: You cannot create Purchase Invoices."), frappe.PermissionError)
@@ -401,7 +393,6 @@ def extract_invoice_and_draft(file_url):
     file_path = file_doc.get_full_path()
     extracted_text = ""
 
-    # Attempt text extraction based on file type
     try:
         lower_path = file_path.lower()
         if lower_path.endswith((".txt", ".csv", ".json", ".html", ".htm")):
@@ -420,17 +411,17 @@ def extract_invoice_and_draft(file_url):
         extracted_text = f"File: {file_doc.file_name}"
 
     prompt = (
-        "Analyze the following text from an uploaded invoice or document.\n"
-        "If it is a valid invoice or bill, extract the supplier name, bill number, and line items.\n"
-        "If the document is NOT an invoice (e.g. documentation, terms, sample website text), output: {\"is_invoice\": false, \"reason\": \"Not an invoice document.\"}\n"
-        "If it IS an invoice, output pure JSON:\n"
-        "{\"is_invoice\": true, \"supplier\": \"Supplier Name\", \"bill_no\": \"INV-123\", \"items\": [{\"item_code\": \"ITEM\", \"qty\": 1, \"rate\": 100}]}\n\n"
-        f"File Name: {file_doc.file_name}\n"
-        f"Content Excerpt:\n{extracted_text or 'No text extracted'}"
+        "Analyze the following text extracted from an uploaded document.\n"
+        "Check if this document is a commercial invoice, bill, receipt, or purchase statement.\n"
+        "If it is NOT an invoice (e.g. general documentation, sample text, terms of service), output: {\"is_invoice\": false, \"reason\": \"The document is not an invoice.\"}\n"
+        "If it IS an invoice, extract the supplier name, invoice/bill number, and all item lines:\n"
+        "{\"is_invoice\": true, \"supplier\": \"Supplier Name\", \"bill_no\": \"INV-123\", \"total\": 1000, \"items\": [{\"item_code\": \"Item Description\", \"qty\": 1, \"rate\": 100}]}\n\n"
+        f"File: {file_doc.file_name}\n"
+        f"Content:\n{extracted_text or 'No text'}"
     )
 
     messages = [
-        {"role": "system", "content": "You are an AI document parser that strictly outputs valid JSON."},
+        {"role": "system", "content": "You are a professional invoice OCR parser that outputs pure JSON."},
         {"role": "user", "content": prompt}
     ]
     res = execute_chat_completion(messages)
@@ -439,25 +430,30 @@ def extract_invoice_and_draft(file_url):
     import re
     try:
         json_match = re.search(r'\{.*\}', raw_content, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group(0))
-        else:
-            data = json.loads(raw_content)
+        data = json.loads(json_match.group(0)) if json_match else json.loads(raw_content)
     except Exception:
-        data = {"is_invoice": False, "reason": "Failed to parse invoice structure from file."}
+        data = {"is_invoice": False, "reason": "Could not identify tabular invoice structure."}
 
     if not data.get("is_invoice", True):
         return {
             "status": "warning",
-            "message": data.get("reason", "Uploaded document is not a valid invoice."),
-            "file_name": file_doc.file_name
+            "file_name": file_doc.file_name,
+            "message": data.get("reason", "Uploaded document does not contain commercial invoice line items.")
         }
 
-    from erpnext_chatgpt.tools import tool_create_draft_purchase_invoice
-    draft_res = tool_create_draft_purchase_invoice(data)
-
     return {
-        "status": "success",
-        "parsed_data": data,
-        "draft_result": draft_res
+        "status": "preview_ready",
+        "file_name": file_doc.file_name,
+        "parsed_data": data
     }
+
+@frappe.whitelist()
+def confirm_and_create_draft_invoice(parsed_data):
+    """
+    Creates the draft Purchase Invoice strictly after user confirmation in the UI.
+    """
+    if isinstance(parsed_data, str):
+        parsed_data = json.loads(parsed_data)
+
+    from erpnext_chatgpt.tools import tool_create_draft_purchase_invoice
+    return tool_create_draft_purchase_invoice(parsed_data)
