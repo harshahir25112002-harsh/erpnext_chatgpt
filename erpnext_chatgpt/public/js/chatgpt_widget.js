@@ -165,7 +165,17 @@
         if (queryStr) {
           const params = new URLSearchParams(queryStr);
           params.forEach(function (val, key) {
-            routeOptions[key] = val;
+            if (val.startsWith("<=")) {
+              routeOptions[key] = ["<=", val.substring(2)];
+            } else if (val.startsWith(">=")) {
+              routeOptions[key] = [">=", val.substring(2)];
+            } else if (val.startsWith("<")) {
+              routeOptions[key] = ["<", val.substring(1)];
+            } else if (val.startsWith(">")) {
+              routeOptions[key] = [">", val.substring(1)];
+            } else {
+              routeOptions[key] = val;
+            }
           });
         }
 

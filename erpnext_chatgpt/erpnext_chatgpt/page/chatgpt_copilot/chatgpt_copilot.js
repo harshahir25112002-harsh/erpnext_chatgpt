@@ -138,12 +138,22 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
 
       const routeParts = routeString.split("/").filter(Boolean).map(decodeURIComponent);
 
-      // Parse filter options
+      // Parse filter options (Supports operators: <=, >=, <, >)
       const routeOptions = {};
       if (queryStr) {
         const params = new URLSearchParams(queryStr);
         params.forEach(function (val, key) {
-          routeOptions[key] = val;
+          if (val.startsWith("<=")) {
+            routeOptions[key] = ["<=", val.substring(2)];
+          } else if (val.startsWith(">=")) {
+            routeOptions[key] = [">=", val.substring(2)];
+          } else if (val.startsWith("<")) {
+            routeOptions[key] = ["<", val.substring(1)];
+          } else if (val.startsWith(">")) {
+            routeOptions[key] = [">", val.substring(1)];
+          } else {
+            routeOptions[key] = val;
+          }
         });
       }
 

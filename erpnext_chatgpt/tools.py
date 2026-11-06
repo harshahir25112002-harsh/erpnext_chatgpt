@@ -2,9 +2,108 @@
 # For license information, please see license.txt
 
 import json
+import re
 import frappe
 from frappe import _
 from frappe.utils import flt, nowdate, add_months
+
+def resolve_item_code(item_query: str) -> str:
+    """
+    100% Case-insensitive, symbol-tolerant Item Code resolver.
+    Matches 'gs122515', 'GS122515', 'gs-122515', 'GS 122515' to the real Item.
+    """
+    if not item_query:
+        return None
+    raw = str(item_query).strip()
+    if not raw:
+        return None
+
+    # 1. Direct exact match
+    if frappe.db.exists("Item", raw):
+        return raw
+
+    # 2. Case-insensitive exact match on name: LOWER(name) = LOWER(raw)
+    matched = frappe.db.sql("SELECT name FROM `tabItem` WHERE LOWER(name) = LOWER(%s) LIMIT 1", (raw,))
+    if matched and matched[0][0]:
+        return matched[0][0]
+
+    # 3. Case-insensitive exact match on item_name: LOWER(item_name) = LOWER(raw)
+    matched = frappe.db.sql("SELECT name FROM `tabItem` WHERE LOWER(item_name) = LOWER(%s) LIMIT 1", (raw,))
+    if matched and matched[0][0]:
+        return matched[0][0]
+
+    # 4. Normalized alphanumeric match (removes hyphens, spaces, underscores, periods)
+    # E.g. "gs122515" matches "GS-122515" or "GS 122515"
+    clean = re.sub(r'[^a-zA-Z0-9]', '', raw).lower()
+    if clean:
+        matched = frappe.db.sql("""
+            SELECT name FROM `tabItem`
+            WHERE REPLACE(REPLACE(REPLACE(REPLACE(LOWER(name), '-', ''), '_', ''), ' ', ''), '.', '') = %s
+               OR REPLACE(REPLACE(REPLACE(REPLACE(LOWER(item_name), '-', ''), '_', ''), ' ', ''), '.', '') = %s
+            LIMIT 1
+        """, (clean, clean))
+        if matched and matched[0][0]:
+            return matched[0][0]
+
+    # 5. Case-insensitive substring match
+    matched = frappe.db.sql("""
+        SELECT name FROM `tabItem`
+        WHERE LOWER(name) LIKE LOWER(%s) OR LOWER(item_name) LIKE LOWER(%s)
+        ORDER BY 
+            CASE WHEN LOWER(name) LIKE LOWER(%s) THEN 1 ELSE 2 END,
+            modified DESC
+        LIMIT 1
+    """, (f"%{raw}%", f"%{raw}%", f"{raw}%"))
+    if matched and matched[0][0]:
+        return matched[0][0]
+
+    return None
+
+def resolve_customer(customer_query: str) -> str:
+    """
+    Case-insensitive customer resolver.
+    """
+    if not customer_query:
+        return None
+    raw = str(customer_query).strip()
+    if not raw:
+        return None
+
+    if frappe.db.exists("Customer", raw):
+        return raw
+
+    matched = frappe.db.sql("SELECT name FROM `tabCustomer` WHERE LOWER(name) = LOWER(%s) OR LOWER(customer_name) = LOWER(%s) LIMIT 1", (raw, raw))
+    if matched and matched[0][0]:
+        return matched[0][0]
+
+    matched = frappe.db.sql("SELECT name FROM `tabCustomer` WHERE LOWER(name) LIKE LOWER(%s) OR LOWER(customer_name) LIKE LOWER(%s) ORDER BY modified DESC LIMIT 1", (f"%{raw}%", f"%{raw}%"))
+    if matched and matched[0][0]:
+        return matched[0][0]
+
+    return None
+
+def resolve_supplier(supplier_query: str) -> str:
+    """
+    Case-insensitive supplier resolver.
+    """
+    if not supplier_query:
+        return None
+    raw = str(supplier_query).strip()
+    if not raw:
+        return None
+
+    if frappe.db.exists("Supplier", raw):
+        return raw
+
+    matched = frappe.db.sql("SELECT name FROM `tabSupplier` WHERE LOWER(name) = LOWER(%s) OR LOWER(supplier_name) = LOWER(%s) LIMIT 1", (raw, raw))
+    if matched and matched[0][0]:
+        return matched[0][0]
+
+    matched = frappe.db.sql("SELECT name FROM `tabSupplier` WHERE LOWER(name) LIKE LOWER(%s) OR LOWER(supplier_name) LIKE LOWER(%s) ORDER BY modified DESC LIMIT 1", (f"%{raw}%", f"%{raw}%"))
+    if matched and matched[0][0]:
+        return matched[0][0]
+
+    return None
 
 # Universal, Version-Agnostic Tool Schemas (v15, v16, v17)
 AVAILABLE_TOOLS = [
@@ -367,22 +466,18 @@ def tool_get_stock_balance(item_code: str = None, warehouse: str = None) -> dict
             "link": "/app/query-report/Stock%20Balance"
         }
 
-    # Case 2: Specific item stock balance
-    real_item_code = item_code.strip()
-    if not frappe.db.exists("Item", real_item_code):
-        matched = frappe.db.get_value("Item", {"item_name": ["like", f"%{real_item_code}%"]}, "name")
-        if matched:
-            real_item_code = matched
-        else:
-            sample_items = frappe.get_all("Item", limit=5, fields=["name", "item_name", "item_group"])
-            for si in sample_items:
-                si["link"] = f"/app/item/{si.name}"
-            return {
-                "error": f"Item '{item_code}' does not exist in your ERPNext system.",
-                "exists": False,
-                "available_items_in_system": sample_items,
-                "message": f"Item '{item_code}' was not found. Please select from existing items above or create it."
-            }
+    # Case 2: Specific item stock balance (100% Case-Insensitive & Symbol-Tolerant)
+    real_item_code = resolve_item_code(item_code)
+    if not real_item_code:
+        sample_items = frappe.get_all("Item", limit=5, fields=["name", "item_name", "item_group"])
+        for si in sample_items:
+            si["link"] = f"/app/item/{si.name}"
+        return {
+            "error": f"Item '{item_code}' does not exist in your ERPNext system.",
+            "exists": False,
+            "available_items_in_system": sample_items,
+            "message": f"Item '{item_code}' was not found. Please select from existing items above or create it."
+        }
 
     filters = {"item_code": real_item_code}
     if warehouse:

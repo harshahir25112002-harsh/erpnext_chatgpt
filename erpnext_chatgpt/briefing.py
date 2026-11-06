@@ -8,30 +8,53 @@ from erpnext_chatgpt.providers import execute_chat_completion
 
 def generate_briefing_content():
     """
-    Synthesizes current ERP operational metrics into a clean executive morning summary.
+    Synthesizes current ERP operational metrics into a clean executive morning summary
+    strictly focused on TODAY's dues and actionable overdue items.
     """
     today = nowdate()
+    currency = frappe.defaults.get_global_default("currency") or "INR"
 
-    # 1. Collections Expected
-    open_receivables = frappe.db.sql("""
+    # 1. Customer Receivables: Due Today vs Past Overdue
+    due_today_rec = frappe.db.sql("""
         SELECT SUM(outstanding_amount) as total, COUNT(name) as count
         FROM `tabSales Invoice`
-        WHERE docstatus = 1 AND outstanding_amount > 0 AND due_date <= %s
+        WHERE docstatus = 1 AND outstanding_amount > 0 AND due_date = %s
     """, (today,), as_dict=True)[0]
-    rec_total = flt(open_receivables.get("total") or 0.0)
-    rec_count = open_receivables.get("count") or 0
+    rec_today_amt = flt(due_today_rec.get("total") or 0.0)
+    rec_today_cnt = due_today_rec.get("count") or 0
 
-    # 2. Vendor Payables Due
-    open_payables = frappe.db.sql("""
+    past_overdue_rec = frappe.db.sql("""
+        SELECT SUM(outstanding_amount) as total, COUNT(name) as count
+        FROM `tabSales Invoice`
+        WHERE docstatus = 1 AND outstanding_amount > 0 AND due_date < %s
+    """, (today,), as_dict=True)[0]
+    rec_overdue_amt = flt(past_overdue_rec.get("total") or 0.0)
+    rec_overdue_cnt = past_overdue_rec.get("count") or 0
+
+    # 2. Vendor Payables: Due Today vs Past Overdue
+    due_today_pay = frappe.db.sql("""
         SELECT SUM(outstanding_amount) as total, COUNT(name) as count
         FROM `tabPurchase Invoice`
-        WHERE docstatus = 1 AND outstanding_amount > 0 AND due_date <= %s
+        WHERE docstatus = 1 AND outstanding_amount > 0 AND due_date = %s
     """, (today,), as_dict=True)[0]
-    pay_total = flt(open_payables.get("total") or 0.0)
-    pay_count = open_payables.get("count") or 0
+    pay_today_amt = flt(due_today_pay.get("total") or 0.0)
+    pay_today_cnt = due_today_pay.get("count") or 0
 
-    # 3. Delayed Purchase Orders
-    delayed_pos = frappe.db.count("Purchase Order", filters={
+    past_overdue_pay = frappe.db.sql("""
+        SELECT SUM(outstanding_amount) as total, COUNT(name) as count
+        FROM `tabPurchase Invoice`
+        WHERE docstatus = 1 AND outstanding_amount > 0 AND due_date < %s
+    """, (today,), as_dict=True)[0]
+    pay_overdue_amt = flt(past_overdue_pay.get("total") or 0.0)
+    pay_overdue_cnt = past_overdue_pay.get("count") or 0
+
+    # 3. Delayed Purchase Orders (due on or before today)
+    pos_due_today = frappe.db.count("Purchase Order", filters={
+        "docstatus": 1,
+        "status": ["in", ["To Receive and Bill", "To Receive"]],
+        "schedule_date": today
+    })
+    pos_delayed_past = frappe.db.count("Purchase Order", filters={
         "docstatus": 1,
         "status": ["in", ["To Receive and Bill", "To Receive"]],
         "schedule_date": ["<", today]
@@ -43,25 +66,21 @@ def generate_briefing_content():
         "priority": ["in", ["High", "Urgent"]]
     }) if frappe.db.exists("DocType", "Issue") else 0
 
-    currency = frappe.defaults.get_global_default("currency") or "USD"
-
-    stats_text = (
-        f"Date: {today}\n"
-        f"- Overdue Customer Receivables: {currency} {rec_total:,.2f} ({rec_count} invoices)\n"
-        f"- Overdue Vendor Payables: {currency} {pay_total:,.2f} ({pay_count} invoices)\n"
-        f"- Delayed Purchase Orders: {delayed_pos}\n"
-        f"- Urgent Open Support Issues: {urgent_issues}\n"
-    )
-
     prompt = (
-        "You are an executive Chief of Staff. Synthesize this raw ERP operational data "
-        "into a crisp, 4-bullet executive morning briefing with actionable priority recommendations. "
-        "Include clickable markdown links formatted as [Label](/app/slug).\n"
-        "For receivables use [Review Overdue Receivables](/app/sales-invoice?outstanding_amount=>0).\n"
-        "For payables use [Review Payables](/app/purchase-invoice?outstanding_amount=>0).\n"
-        "For delayed POs use [View Delayed POs](/app/purchase-order?status=To%20Receive).\n"
-        "Keep it professional, direct, and under 130 words.\n\n"
-        f"{stats_text}"
+        f"You are an executive Chief of Staff preparing the Daily Executive Briefing for {today}.\n"
+        "STRICT INSTRUCTIONS:\n"
+        "1. Focus specifically on TODAY's actionable dues and overdue items.\n"
+        "2. If an area has dues or overdue amounts, report: amount due today, total overdue, and use the exact pre-filtered markdown link provided below.\n"
+        "3. If an area has 0 dues (zero invoices or zero delayed orders), write: '✅ All payments/orders up to date for today' and DO NOT include any links.\n"
+        "4. DO NOT make up generic advice or report on categories that have no pending action.\n"
+        "5. Keep the briefing under 120 words, structured as clean bullet points.\n\n"
+        f"OPERATIONAL DATA FOR {today}:\n"
+        f"- Receivables Due Today: {currency} {rec_today_amt:,.2f} ({rec_today_cnt} invoices) -> Link: [Invoices Due Today](/app/sales-invoice?outstanding_amount=>0&due_date={today})\n"
+        f"- Receivables Overdue: {currency} {rec_overdue_amt:,.2f} ({rec_overdue_cnt} invoices) -> Link: [Review Overdue Receivables](/app/sales-invoice?outstanding_amount=>0&due_date=<={today})\n"
+        f"- Payables Due Today: {currency} {pay_today_amt:,.2f} ({pay_today_cnt} invoices) -> Link: [Payables Due Today](/app/purchase-invoice?outstanding_amount=>0&due_date={today})\n"
+        f"- Payables Overdue: {currency} {pay_overdue_amt:,.2f} ({pay_overdue_cnt} invoices) -> Link: [Review Overdue Payables](/app/purchase-invoice?outstanding_amount=>0&due_date=<={today})\n"
+        f"- Delayed Purchase Orders: {pos_delayed_past + pos_due_today} orders -> Link: [View Delayed POs](/app/purchase-order?status=To%20Receive&schedule_date=<={today})\n"
+        f"- Urgent Support Issues: {urgent_issues}\n"
     )
 
     messages = [
@@ -69,7 +88,7 @@ def generate_briefing_content():
         {"role": "user", "content": prompt}
     ]
     res = execute_chat_completion(messages, model_override=None)
-    return res.get("content", stats_text)
+    return res.get("content", "Executive briefing generated.")
 
 def send_daily_executive_briefing():
     """

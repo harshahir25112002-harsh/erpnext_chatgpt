@@ -128,13 +128,39 @@ def _process_chat(user, message, conversation_id=None, reference_doctype=None, r
     # Proactive Live ERP Data Injection based on User Intent (Eliminates dummy hallucinated items)
     msg_lower = (message or "").lower()
     from erpnext_chatgpt.tools import (
+        resolve_item_code,
         tool_get_items_and_stock,
         tool_get_stock_balance,
         tool_get_vendor_payables,
         tool_get_customer_outstanding
     )
 
-    if any(k in msg_lower for k in ["item", "stock", "inventory", "product", "material", "balance"]):
+    # 1. Proactive Item Code Identification (100% Case-Insensitive, e.g. gs122515 -> GS122515)
+    resolved_item = resolve_item_code(message.strip())
+    if not resolved_item and len(message.strip()) > 2:
+        words = re.findall(r'[a-zA-Z0-9_\-\.]+', message)
+        for w in words:
+            if len(w) >= 3:
+                cand = resolve_item_code(w)
+                if cand:
+                    resolved_item = cand
+                    break
+
+    if resolved_item:
+        try:
+            real_stock_info = tool_get_stock_balance(resolved_item)
+            messages.append({
+                "role": "system",
+                "content": (
+                    f"[IDENTIFIED ITEM IN USER QUERY: '{resolved_item}']:\n"
+                    f"User typed: '{message.strip()}'. Resolved to canonical ERPNext item: '{resolved_item}'.\n"
+                    f"Live Stock details:\n{json.dumps(real_stock_info, default=str)}\n"
+                    f"NOTE: The user is querying item '{resolved_item}'. Report the above real warehouse stock immediately in a clean table. Do not alter or hyphenate the item code."
+                )
+            })
+        except Exception:
+            pass
+    elif any(k in msg_lower for k in ["item", "stock", "inventory", "product", "material", "balance"]):
         try:
             live_items = tool_get_items_and_stock(limit=15)
             messages.append({
