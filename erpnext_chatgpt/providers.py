@@ -79,7 +79,7 @@ def execute_chat_completion(messages: list, tools: list = None, tool_choice: str
     provider = settings.provider or "OpenAI"
     model = model_override or settings.model or "gpt-4o-mini"
     temperature = flt(settings.temperature or 0.7)
-    max_tokens = int(settings.max_tokens or 1000)
+    max_tokens = int(settings.max_tokens or 800)
     api_key = settings.get_password("api_key")
 
     start_time = time.time()
@@ -94,7 +94,7 @@ def execute_chat_completion(messages: list, tools: list = None, tool_choice: str
             if provider == "Anthropic":
                 resp_content, usage, tool_calls = call_anthropic(settings, api_key, model, messages, temperature, max_tokens)
             else:
-                # OpenAI / Azure / Ollama compatible
+                # OpenAI / Azure / Ollama / OpenRouter compatible
                 resp_content, usage, tool_calls = call_openai_compatible(settings, api_key, model, messages, temperature, max_tokens, tools, tool_choice)
 
             latency = round(time.time() - start_time, 2)
@@ -113,7 +113,30 @@ def execute_chat_completion(messages: list, tools: list = None, tool_choice: str
 
         except requests.exceptions.HTTPError as http_err:
             status_code = http_err.response.status_code if http_err.response else 500
+            err_text = str(http_err)
             last_error = http_err
+
+            # Smart OpenRouter credit auto-recovery: "can only afford X"
+            if "fewer max_tokens" in err_text or "can only afford" in err_text:
+                import re
+                afford_match = re.search(r"can only afford (\d+)", err_text)
+                if afford_match:
+                    affordable = int(afford_match.group(1))
+                    if affordable > 80 and max_tokens > affordable:
+                        # Automatically adapt max_tokens and immediately retry!
+                        max_tokens = max(affordable - 25, 60)
+                        continue
+                
+                # If affordable is very low or 0:
+                last_error = (
+                    "OpenRouter Credit Limit Reached: Your current OpenRouter credit balance is almost depleted. "
+                    "To fix this immediately: "
+                    "1) In 'AI Settings' (/app/ai-settings), switch Model to a 100% Free model such as 'google/gemini-2.0-flash-exp:free' or 'meta-llama/llama-3.3-70b-instruct:free' (Zero cost), "
+                    "OR 2) Lower 'Max Tokens' to 500, "
+                    "OR 3) Add credits at https://openrouter.ai/settings/credits."
+                )
+                break
+
             # Retry on Rate Limit (429) or Server Errors (500, 502, 503, 504)
             if status_code in (429, 500, 502, 503, 504) and attempt < len(retry_delays):
                 continue
