@@ -85,28 +85,79 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     </div>
   `).appendTo(page.main);
 
-  // Global Filtered Link Interceptor for Frappe v15, v16, v17
+  // Universal Link Interceptor for Frappe v15, v16, v17
   container.on("click", ".chatgpt-page-bubble a, .chatgpt-btn-open-doc", function (e) {
-    const rawHref = $(this).attr("href");
+    if (e.ctrlKey || e.metaKey || e.which === 2) return;
+
+    let rawHref = $(this).attr("href");
     if (!rawHref) return;
 
-    if (rawHref.includes("/app/") || rawHref.startsWith("app/")) {
-      e.preventDefault();
-      try {
-        const urlObj = new URL(rawHref, window.location.origin);
-        const pathParts = urlObj.pathname.replace(/^\/?app\/?/, "").split("/").filter(Boolean);
-        
-        // Pass query parameters to Frappe's route options so filters apply!
-        const routeOptions = {};
-        urlObj.searchParams.forEach(function (val, key) {
+    const isInternal = rawHref.includes("/app") || 
+                       rawHref.includes("/desk") || 
+                       rawHref.startsWith("#") || 
+                       rawHref.includes("itfarmer.in") ||
+                       rawHref.includes(window.location.host);
+
+    if (!isInternal && (rawHref.startsWith("http://") || rawHref.startsWith("https://"))) {
+      $(this).attr("target", "_blank");
+      return;
+    }
+
+    e.preventDefault();
+
+    try {
+      // 1. If it contains a hash (e.g. ...desk/chatgpt_copilot#/app/purchase-invoice/PINV-26-00016)
+      // The real target route is ALWAYS after the '#'
+      let routeString = rawHref;
+      if (routeString.includes("#")) {
+        routeString = routeString.split("#")[1];
+      }
+
+      // 2. If it's an absolute URL without hash
+      if (routeString.startsWith("http://") || routeString.startsWith("https://")) {
+        const u = new URL(routeString);
+        routeString = u.pathname + u.search;
+      }
+
+      // 3. Extract query parameters
+      let queryStr = "";
+      if (routeString.includes("?")) {
+        const qParts = routeString.split("?");
+        routeString = qParts[0];
+        queryStr = qParts[1];
+      }
+
+      // 4. Clean leading slashes and app/ or desk/ prefixes
+      routeString = routeString.replace(/^\/+/, "");
+      if (routeString.startsWith("app/")) {
+        routeString = routeString.substring(4);
+      } else if (routeString.startsWith("desk/")) {
+        routeString = routeString.substring(5);
+      }
+      routeString = routeString.replace(/\/+$/, "");
+
+      const routeParts = routeString.split("/").filter(Boolean).map(decodeURIComponent);
+
+      // Parse filter options
+      const routeOptions = {};
+      if (queryStr) {
+        const params = new URLSearchParams(queryStr);
+        params.forEach(function (val, key) {
           routeOptions[key] = val;
         });
-
-        frappe.route_options = routeOptions;
-        frappe.set_route(pathParts);
-      } catch (err) {
-        window.location.href = rawHref;
       }
+
+      frappe.route_options = routeOptions;
+
+      // Navigate smoothly within Desk
+      if (routeParts.length > 0) {
+        frappe.set_route(routeParts);
+      } else {
+        window.location.href = "/app/" + routeString + (queryStr ? "?" + queryStr : "");
+      }
+    } catch (err) {
+      console.warn("Link navigation fallback:", err);
+      window.location.href = rawHref;
     }
   });
 

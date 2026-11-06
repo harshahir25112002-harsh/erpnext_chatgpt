@@ -111,10 +111,11 @@ def _process_chat(user, message, conversation_id=None, reference_doctype=None, r
     sys_prompt = (
         (settings.global_system_prompt or "You are an intelligent ERPNext Copilot.") +
         "\nIMPORTANT GUIDELINES FOR RESPONSES:\n"
-        "1. When reporting records (invoices, orders, stock, items), format them as clear Markdown tables.\n"
-        "2. Include clickable relative links formatted as [Record Name](/app/slug/name) or [Filter List](/app/slug?key=value).\n"
-        "3. Never guess item codes or invoice series; use live tool results.\n"
-        "4. Always present a clean, concise breakdown with actionable steps."
+        "1. When reporting records (invoices, orders, stock, items), format them as clear, well-structured Markdown tables.\n"
+        "2. For every record name in tables or text, use the exact relative link from tool results, formatted strictly as [DocName](/app/doctype-slug/DocName) e.g. [PINV-26-00016](/app/purchase-invoice/PINV-26-00016).\n"
+        "3. NEVER include protocol, domain, '/desk', or '#' in links (e.g. NEVER output https://... or /desk/... or #/app/...). Use ONLY relative links starting with /app/.\n"
+        "4. Never guess item codes or series; always use live tool results.\n"
+        "5. Always present clean, actionable summaries with direct links."
     )
     messages.append({"role": "system", "content": sys_prompt})
 

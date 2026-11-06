@@ -114,6 +114,72 @@
       }
     });
 
+    // Universal Link Interceptor for Drawer
+    document.getElementById("chatgpt-messages").addEventListener("click", function (e) {
+      const anchor = e.target.closest("a");
+      if (!anchor) return;
+      if (e.ctrlKey || e.metaKey || e.which === 2) return;
+
+      let rawHref = anchor.getAttribute("href");
+      if (!rawHref) return;
+
+      const isInternal = rawHref.includes("/app") || 
+                         rawHref.includes("/desk") || 
+                         rawHref.startsWith("#") || 
+                         rawHref.includes(window.location.host);
+
+      if (!isInternal && (rawHref.startsWith("http://") || rawHref.startsWith("https://"))) {
+        anchor.setAttribute("target", "_blank");
+        return;
+      }
+
+      e.preventDefault();
+
+      try {
+        let routeString = rawHref;
+        if (routeString.includes("#")) {
+          routeString = routeString.split("#")[1];
+        }
+        if (routeString.startsWith("http://") || routeString.startsWith("https://")) {
+          const u = new URL(routeString);
+          routeString = u.pathname + u.search;
+        }
+
+        let queryStr = "";
+        if (routeString.includes("?")) {
+          const qParts = routeString.split("?");
+          routeString = qParts[0];
+          queryStr = qParts[1];
+        }
+
+        routeString = routeString.replace(/^\/+/, "");
+        if (routeString.startsWith("app/")) {
+          routeString = routeString.substring(4);
+        } else if (routeString.startsWith("desk/")) {
+          routeString = routeString.substring(5);
+        }
+        routeString = routeString.replace(/\/+$/, "");
+
+        const routeParts = routeString.split("/").filter(Boolean).map(decodeURIComponent);
+        const routeOptions = {};
+        if (queryStr) {
+          const params = new URLSearchParams(queryStr);
+          params.forEach(function (val, key) {
+            routeOptions[key] = val;
+          });
+        }
+
+        frappe.route_options = routeOptions;
+        if (routeParts.length > 0) {
+          frappe.set_route(routeParts);
+        } else {
+          window.location.href = "/app/" + routeString + (queryStr ? "?" + queryStr : "");
+        }
+      } catch (err) {
+        window.location.href = rawHref;
+      }
+    });
+
     // Realtime WebSocket Listener for background async completions
     if (window.frappe && frappe.realtime) {
       frappe.realtime.on("ai_chat_response", function (data) {

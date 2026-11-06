@@ -217,6 +217,9 @@ def tool_search_erp_records(doctype: str, search_term: str = None, custom_filter
 
     records = frappe.get_all(doctype, filters=filters, fields=fields, limit_page_length=limit, order_by="modified desc")
 
+    for r in records:
+        r["link"] = f"/app/{frappe.scrub(doctype)}/{r.name}"
+
     filter_param = f"?customer={search_term}" if (doctype == "Sales Invoice" and search_term) else ""
     return {
         "doctype": doctype,
@@ -292,6 +295,9 @@ def tool_get_customer_outstanding(customer: str) -> dict:
     overdue_invoices = [inv for inv in invoices if str(inv.due_date) < nowdate()]
     total_overdue = sum(flt(inv.outstanding_amount) for inv in overdue_invoices)
 
+    for inv in invoices:
+        inv["link"] = f"/app/sales-invoice/{inv.name}"
+
     return {
         "customer": real_customer,
         "total_outstanding": total_outstanding,
@@ -312,6 +318,8 @@ def tool_get_sales_summary(months: int = 3, customer: str = None) -> dict:
 
     orders = frappe.get_all("Sales Order", filters=filters, fields=["name", "customer", "grand_total", "transaction_date"], limit=10, order_by="transaction_date desc")
     total_sales = sum(flt(o.grand_total) for o in orders)
+    for o in orders:
+        o["link"] = f"/app/sales-order/{o.name}"
 
     return {
         "period_months": months,
@@ -365,6 +373,8 @@ def tool_get_delayed_purchase_orders() -> dict:
         fields=["name", "supplier", "schedule_date", "grand_total", "status"],
         limit_page_length=15
     )
+    for po in delayed:
+        po["link"] = f"/app/purchase-order/{po.name}"
 
     return {
         "delayed_count": len(delayed),
@@ -388,6 +398,9 @@ def tool_get_vendor_payables(supplier: str = None) -> dict:
 
     total_payable = sum(flt(inv.outstanding_amount) for inv in invoices)
     overdue_invoices = [inv for inv in invoices if inv.due_date and str(inv.due_date) < nowdate()]
+
+    for inv in invoices:
+        inv["link"] = f"/app/purchase-invoice/{inv.name}"
 
     return {
         "supplier": supplier or "All Suppliers",
