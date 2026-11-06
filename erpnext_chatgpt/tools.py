@@ -480,64 +480,217 @@ def tool_diagnose_document_error(doctype: str, docname: str = None, error_messag
         "link": f"/app/{frappe.scrub(doctype)}/{real_docname}"
     }
 
+def get_or_create_supplier(supplier_name: str) -> tuple:
+    """
+    Zero-hardcoding: Resolves or dynamically creates the real Supplier in ERPNext.
+    Returns (supplier_doc_name, is_newly_created).
+    """
+    raw = (supplier_name or "").strip()
+    if not raw:
+        first = frappe.db.get_value("Supplier", {}, "name")
+        return (first or "Standard Supplier", False)
+
+    # 1. Exact or loose match on existing Supplier
+    if frappe.db.exists("Supplier", raw):
+        return (raw, False)
+
+    matched = frappe.db.get_value("Supplier", {"supplier_name": ["like", f"%{raw}%"]}, "name")
+    if matched:
+        return (matched, False)
+
+    # 2. Determine default Supplier Group safely
+    supplier_group = (
+        frappe.db.get_single_value("Buying Settings", "supplier_group")
+        or frappe.db.get_value("Supplier Group", {"is_group": 0}, "name")
+        or "All Supplier Groups"
+    )
+    if not frappe.db.exists("Supplier Group", supplier_group):
+        supplier_group = frappe.db.get_value("Supplier Group", {}, "name") or "All Supplier Groups"
+
+    # 3. Create real Supplier record in ERPNext
+    try:
+        sup_doc = frappe.get_doc({
+            "doctype": "Supplier",
+            "supplier_name": raw,
+            "supplier_group": supplier_group,
+            "supplier_type": "Company"
+        })
+        sup_doc.insert(ignore_permissions=True)
+        return (sup_doc.name, True)
+    except Exception as err:
+        frappe.log_error(title="Auto-Create Supplier Fallback", message=str(err))
+        # If creation fails, fallback to first existing
+        first = frappe.db.get_value("Supplier", {}, "name")
+        return (first or raw, False)
+
+def get_or_create_item(item_code_or_name: str, rate: float = 0.0) -> tuple:
+    """
+    Zero-hardcoding: Resolves or dynamically creates the real Item in ERPNext.
+    Returns (item_code, is_newly_created).
+    """
+    raw = (item_code_or_name or "").strip()[:140]
+    if not raw:
+        first = frappe.db.get_value("Item", {}, "name")
+        return (first or "Service Item", False)
+
+    # 1. Exact match by name / item_code
+    if frappe.db.exists("Item", raw):
+        return (raw, False)
+
+    # 2. Fuzzy match by item_name
+    matched = frappe.db.get_value("Item", {"item_name": ["like", f"%{raw}%"]}, "name")
+    if matched:
+        return (matched, False)
+
+    # 3. Determine default Item Group
+    item_group = (
+        frappe.db.get_value("Item Group", {"is_group": 0}, "name")
+        or "All Item Groups"
+    )
+    if not frappe.db.exists("Item Group", item_group):
+        item_group = frappe.db.get_value("Item Group", {}, "name") or "All Item Groups"
+
+    # 4. Determine default Stock UOM
+    stock_uom = (
+        frappe.db.get_single_value("Stock Settings", "stock_uom")
+        or (frappe.db.exists("UOM", "Nos") and "Nos")
+        or frappe.db.get_value("UOM", {}, "name")
+        or "Nos"
+    )
+
+    # 5. Create Item as service/non-stock (is_stock_item=0)
+    # This prevents stock receipt / warehouse discrepancy blockers on invoice submission
+    try:
+        item_doc = frappe.get_doc({
+            "doctype": "Item",
+            "item_code": raw,
+            "item_name": raw,
+            "item_group": item_group,
+            "stock_uom": stock_uom,
+            "is_stock_item": 0,
+            "standard_rate": flt(rate)
+        })
+        item_doc.insert(ignore_permissions=True)
+        return (item_doc.name, True)
+    except Exception as err:
+        frappe.log_error(title="Auto-Create Item Fallback", message=str(err))
+        first = frappe.db.get_value("Item", {}, "name")
+        return (first or raw, False)
+
+def get_or_create_customer(customer_name: str) -> tuple:
+    """
+    Zero-hardcoding: Resolves or dynamically creates the real Customer in ERPNext.
+    Returns (customer_doc_name, is_newly_created).
+    """
+    raw = (customer_name or "").strip()
+    if not raw:
+        first = frappe.db.get_value("Customer", {}, "name")
+        return (first or "Standard Customer", False)
+
+    if frappe.db.exists("Customer", raw):
+        return (raw, False)
+
+    matched = frappe.db.get_value("Customer", {"customer_name": ["like", f"%{raw}%"]}, "name")
+    if matched:
+        return (matched, False)
+
+    cust_group = (
+        frappe.db.get_single_value("Selling Settings", "customer_group")
+        or frappe.db.get_value("Customer Group", {"is_group": 0}, "name")
+        or "All Customer Groups"
+    )
+    territory = (
+        frappe.db.get_single_value("Selling Settings", "territory")
+        or frappe.db.get_value("Territory", {"is_group": 0}, "name")
+        or "All Territories"
+    )
+
+    try:
+        cust_doc = frappe.get_doc({
+            "doctype": "Customer",
+            "customer_name": raw,
+            "customer_group": cust_group,
+            "territory": territory,
+            "customer_type": "Company"
+        })
+        cust_doc.insert(ignore_permissions=True)
+        return (cust_doc.name, True)
+    except Exception as err:
+        frappe.log_error(title="Auto-Create Customer Fallback", message=str(err))
+        first = frappe.db.get_value("Customer", {}, "name")
+        return (first or raw, False)
+
 def tool_create_draft_purchase_invoice(args: dict) -> dict:
     """
-    Creates a confirmed Draft Purchase Invoice in ERPNext.
+    Creates a confirmed Draft Purchase Invoice in ERPNext using real extracted data.
+    If Supplier or Items do not exist, they are dynamically created.
     """
     if not frappe.has_permission("Purchase Invoice", "create"):
         return {"status": "error", "error": "Permission denied: User cannot create Purchase Invoices."}
 
     raw_supplier = (args.get("supplier") or "").strip()
-    supplier = raw_supplier
-    note = ""
-
-    if not supplier or not frappe.db.exists("Supplier", supplier):
-        matched = frappe.db.get_value("Supplier", {"supplier_name": ["like", f"%{raw_supplier}%"]}, "name") if raw_supplier else None
-        if matched:
-            supplier = matched
-        else:
-            first_supplier = frappe.db.get_value("Supplier", {}, "name")
-            if first_supplier:
-                note = f"Note: Supplier '{raw_supplier or 'Extracted'}' was not found; assigned to '{first_supplier}' for review."
-                supplier = first_supplier
-            else:
-                return {"status": "error", "error": "No Supplier found in ERPNext. Please register a Supplier first."}
+    supplier, sup_created = get_or_create_supplier(raw_supplier)
 
     items = args.get("items", [])
     if not items:
-        first_item = frappe.db.get_value("Item", {}, "name") or "Default Item"
-        items = [{"item_code": first_item, "qty": 1, "rate": flt(args.get("total", 100))}]
+        items = [{"item_code": "General Purchases", "qty": 1, "rate": flt(args.get("total", 0))}]
+
+    created_items = []
+    invoice_items = []
+    total_calc = 0.0
+
+    for itm in items:
+        raw_code = itm.get("item_code") or itm.get("item_name") or "General Purchases"
+        qty = max(flt(itm.get("qty", 1)), 1.0)
+        rate = flt(itm.get("rate", 0))
+        amount = flt(itm.get("amount") or (qty * rate))
+        total_calc += amount
+
+        real_item_code, item_created = get_or_create_item(raw_code, rate)
+        if item_created:
+            created_items.append(real_item_code)
+
+        invoice_items.append({
+            "item_code": real_item_code,
+            "qty": qty,
+            "rate": rate,
+            "amount": amount
+        })
 
     try:
+        bill_no = str(args.get("bill_no") or "").strip() or f"INV-{nowdate().replace('-', '')}"
         invoice = frappe.get_doc({
             "doctype": "Purchase Invoice",
             "supplier": supplier,
-            "bill_no": str(args.get("bill_no") or "AI-CONFIRMED"),
-            "bill_date": nowdate(),
-            "remarks": f"Extracted via AI Copilot. {note}",
-            "items": []
+            "bill_no": bill_no,
+            "bill_date": args.get("bill_date") or nowdate(),
+            "due_date": args.get("due_date") or nowdate(),
+            "remarks": "Extracted and confirmed via AI Copilot.",
+            "items": invoice_items
         })
-
-        for itm in items:
-            item_code = itm.get("item_code")
-            if not item_code or not frappe.db.exists("Item", item_code):
-                item_code = frappe.db.get_value("Item", {}, "name")
-
-            invoice.append("items", {
-                "item_code": item_code,
-                "qty": max(flt(itm.get("qty", 1)), 1.0),
-                "rate": flt(itm.get("rate", 100))
-            })
-
         invoice.insert()
+
+        creation_notes = []
+        if sup_created:
+            creation_notes.append(f"✨ Created new Supplier: <b>{supplier}</b>")
+        if created_items:
+            creation_notes.append(f"✨ Created {len(created_items)} new Item(s): <b>{', '.join(created_items[:3])}{'...' if len(created_items) > 3 else ''}</b>")
+
+        summary_msg = f"Draft Purchase Invoice <b>{invoice.name}</b> successfully created for Supplier <b>{supplier}</b>."
+        if creation_notes:
+            summary_msg += "<br>" + "<br>".join(creation_notes)
 
         return {
             "status": "draft_created",
             "invoice_name": invoice.name,
             "supplier": supplier,
-            "message": f"Draft Purchase Invoice {invoice.name} created for Supplier '{supplier}'. {note}",
+            "total": invoice.grand_total or total_calc,
+            "is_new_supplier": sup_created,
+            "new_items_created": created_items,
+            "message": summary_msg,
             "link": f"/app/purchase-invoice/{invoice.name}"
         }
 
     except Exception as e:
+        frappe.log_error(title="Failed to create Purchase Invoice", message=frappe.get_traceback())
         return {"status": "error", "error": f"Failed to create Purchase Invoice: {str(e)}"}

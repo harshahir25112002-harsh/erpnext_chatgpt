@@ -414,14 +414,25 @@ def extract_invoice_and_draft(file_url):
         "Analyze the following text extracted from an uploaded document.\n"
         "Check if this document is a commercial invoice, bill, receipt, or purchase statement.\n"
         "If it is NOT an invoice (e.g. general documentation, sample text, terms of service), output: {\"is_invoice\": false, \"reason\": \"The document is not an invoice.\"}\n"
-        "If it IS an invoice, extract the supplier name, invoice/bill number, and all item lines:\n"
-        "{\"is_invoice\": true, \"supplier\": \"Supplier Name\", \"bill_no\": \"INV-123\", \"total\": 1000, \"items\": [{\"item_code\": \"Item Description\", \"qty\": 1, \"rate\": 100}]}\n\n"
+        "If it IS an invoice, extract the real supplier name, invoice/bill number, bill date, and all line items with exact names, quantities, and rates.\n"
+        "Format strictly as JSON:\n"
+        "{\n"
+        "  \"is_invoice\": true,\n"
+        "  \"supplier\": \"Exact Supplier Name\",\n"
+        "  \"bill_no\": \"Invoice/Bill Number\",\n"
+        "  \"bill_date\": \"YYYY-MM-DD\",\n"
+        "  \"total\": 1000.0,\n"
+        "  \"currency\": \"INR\",\n"
+        "  \"items\": [\n"
+        "    {\"item_code\": \"Line Item Description\", \"qty\": 1, \"rate\": 100, \"amount\": 100}\n"
+        "  ]\n"
+        "}\n\n"
         f"File: {file_doc.file_name}\n"
         f"Content:\n{extracted_text or 'No text'}"
     )
 
     messages = [
-        {"role": "system", "content": "You are a professional invoice OCR parser that outputs pure JSON."},
+        {"role": "system", "content": "You are a professional invoice OCR parser that outputs pure JSON without markdown code fences."},
         {"role": "user", "content": prompt}
     ]
     res = execute_chat_completion(messages)
@@ -440,6 +451,30 @@ def extract_invoice_and_draft(file_url):
             "file_name": file_doc.file_name,
             "message": data.get("reason", "Uploaded document does not contain commercial invoice line items.")
         }
+
+    # Annotate real existence in ERPNext so the UI can clearly display it to the user
+    raw_sup = (data.get("supplier") or "").strip()
+    sup_exists = False
+    if raw_sup:
+        sup_exists = bool(frappe.db.exists("Supplier", raw_sup) or frappe.db.get_value("Supplier", {"supplier_name": ["like", f"%{raw_sup}%"]}, "name"))
+    data["supplier_exists"] = sup_exists
+
+    items = data.get("items", [])
+    running_total = 0.0
+    for itm in items:
+        raw_icode = (itm.get("item_code") or "").strip()[:140]
+        item_exists = False
+        if raw_icode:
+            item_exists = bool(frappe.db.exists("Item", raw_icode) or frappe.db.get_value("Item", {"item_name": ["like", f"%{raw_icode}%"]}, "name"))
+        itm["item_exists"] = item_exists
+        qty = flt(itm.get("qty", 1))
+        rate = flt(itm.get("rate", 0))
+        amt = flt(itm.get("amount") or (qty * rate))
+        itm["amount"] = amt
+        running_total += amt
+
+    if not data.get("total") or flt(data.get("total")) == 0:
+        data["total"] = running_total
 
     return {
         "status": "preview_ready",

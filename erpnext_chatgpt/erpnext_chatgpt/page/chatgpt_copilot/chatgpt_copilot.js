@@ -86,7 +86,7 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
   `).appendTo(page.main);
 
   // Global Filtered Link Interceptor for Frappe v15, v16, v17
-  container.on("click", ".chatgpt-page-bubble a", function (e) {
+  container.on("click", ".chatgpt-page-bubble a, .chatgpt-btn-open-doc", function (e) {
     const rawHref = $(this).attr("href");
     if (!rawHref) return;
 
@@ -110,72 +110,93 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     }
   });
 
-  // Voice Input (Speech Recognition with Permission Handling)
+  // Voice Input (Speech Recognition with Graceful Inline Permission Helper)
   function setupSpeechRecognition() {
     const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechAPI) {
-      container.find("#page-btn-mic").attr("title", __("Speech recognition not supported in this browser.")).css("opacity", 0.4);
+      container.find("#page-btn-mic").attr("title", __("Speech recognition not supported in this browser (Use Chrome/Edge).")).css("opacity", 0.4);
       return;
     }
 
-    speechRecognizer = new SpeechAPI();
-    speechRecognizer.continuous = false;
-    speechRecognizer.interimResults = false;
-    speechRecognizer.lang = 'en-IN';
+    try {
+      speechRecognizer = new SpeechAPI();
+      speechRecognizer.continuous = false;
+      speechRecognizer.interimResults = false;
+      speechRecognizer.lang = navigator.language || 'en-IN';
 
-    speechRecognizer.onstart = function () {
-      isListening = true;
-      container.find("#page-btn-mic").addClass("is-recording").attr("title", __("Listening... Speak now"));
-      frappe.show_alert({ message: __("🎙️ Microphone active... Speak your question now"), indicator: "blue" });
-    };
+      speechRecognizer.onstart = function () {
+        isListening = true;
+        container.find("#mic-permission-help").slideUp();
+        container.find("#page-btn-mic").addClass("is-recording").attr("title", __("Listening... Speak now or click to stop"));
+        frappe.show_alert({ message: __("🎙️ Microphone active... Speak your question now"), indicator: "blue" });
+      };
 
-    speechRecognizer.onresult = function (event) {
-      const transcript = event.results[0][0].transcript;
-      const input = container.find("#page-input-field");
-      const current = input.val();
-      input.val(current ? current + " " + transcript : transcript).focus();
-    };
+      speechRecognizer.onresult = function (event) {
+        if (event.results && event.results[0] && event.results[0][0]) {
+          const transcript = event.results[0][0].transcript;
+          const input = container.find("#page-input-field");
+          const current = input.val();
+          input.val(current ? current + " " + transcript : transcript).focus();
+        }
+      };
 
-    speechRecognizer.onerror = function (event) {
-      stopListening();
-      if (event.error === "not-allowed" || event.error === "permission-denied") {
-        frappe.msgprint({
-          title: __("Microphone Permission Required"),
-          indicator: "orange",
-          message: __("Please allow microphone access in your browser address bar to use voice input.")
-        });
-      } else if (event.error !== "no-speech") {
-        frappe.show_alert({ message: __("Voice error: {0}", [event.error]), indicator: "orange" });
-      }
-    };
+      speechRecognizer.onerror = function (event) {
+        stopListening();
+        if (event.error === "not-allowed" || event.error === "permission-denied") {
+          showMicPermissionBanner();
+        } else if (event.error === "audio-capture") {
+          frappe.show_alert({ message: __("No microphone detected or microphone is in use by another app."), indicator: "orange" });
+        } else if (event.error !== "no-speech") {
+          frappe.show_alert({ message: __("Voice note: {0}", [event.error]), indicator: "orange" });
+        }
+      };
 
-    speechRecognizer.onend = function () {
-      stopListening();
-    };
+      speechRecognizer.onend = function () {
+        stopListening();
+      };
+    } catch (err) {
+      console.warn("Speech recognition setup error:", err);
+    }
+  }
+
+  function showMicPermissionBanner() {
+    let banner = container.find("#mic-permission-help");
+    if (banner.length === 0) {
+      banner = $(`
+        <div id="mic-permission-help" class="chatgpt-mic-banner">
+          <div class="banner-text">
+            <strong>🔒 ${__('Microphone Access Needed')}:</strong> 
+            ${__('Click the lock/settings icon next to the URL in your browser bar ➔ set Microphone to "Allow" ➔ click the 🎙️ mic button again.')}
+          </div>
+          <button class="banner-close-btn" title="${__('Dismiss')}">×</button>
+        </div>
+      `).insertBefore(container.find(".chatgpt-page-input-box"));
+      banner.find(".banner-close-btn").on("click", function () {
+        banner.slideUp();
+      });
+    }
+    banner.slideDown();
   }
 
   function toggleListening() {
     if (!speechRecognizer) {
       setupSpeechRecognition();
     }
-    if (!speechRecognizer) return;
+    if (!speechRecognizer) {
+      frappe.show_alert({ message: __("Speech recognition is not supported in this browser. Please use Chrome or Edge."), indicator: "orange" });
+      return;
+    }
 
     if (isListening) {
-      speechRecognizer.stop();
+      try {
+        speechRecognizer.stop();
+      } catch (e) {}
       stopListening();
     } else {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices.getUserMedia({ audio: true }).then(function () {
-          speechRecognizer.start();
-        }).catch(function () {
-          frappe.msgprint({
-            title: __("Microphone Blocked"),
-            indicator: "red",
-            message: __("Please click the lock/settings icon in your browser address bar and allow Microphone access.")
-          });
-        });
-      } else {
+      try {
         speechRecognizer.start();
+      } catch (err) {
+        console.warn("Speech recognizer start error:", err);
       }
     }
   }
@@ -185,7 +206,7 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
     container.find("#page-btn-mic").removeClass("is-recording").attr("title", __("Voice Input"));
   }
 
-  // Invoice File Upload with Interactive Confirmation Card
+  // Invoice File Upload with Interactive Confirmation Card (Table View & Real Data Auto-Creation)
   function openInvoiceUploader() {
     new frappe.ui.FileUploader({
       allow_multiple: false,
@@ -197,13 +218,13 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
         if (container.find(".chatgpt-starter-grid").length > 0) {
           container.find("#page-messages-area").empty();
         }
-        appendMessageUI("user", `📎 ${__('Uploaded File')}: <b>${file_doc.file_name}</b>`);
+        appendMessageUI("user", `📎 ${__('Uploaded Document')}: <b>${frappe.utils.escape_html(file_doc.file_name)}</b>`);
         
         frappe.call({
           method: "erpnext_chatgpt.api.extract_invoice_and_draft",
           args: { file_url: file_doc.file_url },
           freeze: true,
-          freeze_message: __("Analyzing file..."),
+          freeze_message: __("Analyzing invoice line items..."),
           callback: function (r) {
             if (!r.message) {
               appendMessageUI("assistant", "⚠️ " + __('No response from document extractor.'));
@@ -213,37 +234,106 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
             if (r.message.status === "preview_ready") {
               const data = r.message.parsed_data;
               const items = data.items || [];
-              let itemsRows = items.map(it => `
-                <tr>
-                  <td>${frappe.utils.escape_html(it.item_code || 'Item')}</td>
-                  <td style="text-align: right;">${it.qty || 1}</td>
-                  <td style="text-align: right;">${it.rate || 0}</td>
-                </tr>
-              `).join('');
+              const currency = data.currency || (frappe.defaults.get_global_default("currency") || "INR");
+
+              const supBadge = data.supplier_exists 
+                ? `<span class="chatgpt-status-badge badge-matched">✓ ${__('Existing Supplier')}</span>`
+                : `<span class="chatgpt-status-badge badge-new">✨ ${__('Will Auto-Create Supplier')}</span>`;
+
+              let itemsRows = items.map((it, idx) => {
+                const qty = flt(it.qty, 1);
+                const rate = flt(it.rate, 0);
+                const lineTotal = flt(it.amount || (qty * rate));
+                const itemBadge = it.item_exists
+                  ? `<span class="chatgpt-status-badge badge-matched">✓ ${__('Existing Item')}</span>`
+                  : `<span class="chatgpt-status-badge badge-new">✨ ${__('Will Auto-Create Item')}</span>`;
+
+                return `
+                  <tr>
+                    <td style="text-align: center; color: var(--text-muted);">${idx + 1}</td>
+                    <td>
+                      <div style="font-weight: 500;">${frappe.utils.escape_html(it.item_code || it.item_name || 'Item')}</div>
+                      <div style="margin-top: 2px;">${itemBadge}</div>
+                    </td>
+                    <td style="text-align: right; font-weight: 500;">${qty}</td>
+                    <td style="text-align: right;">${rate ? format_currency(rate, currency) : '-'}</td>
+                    <td style="text-align: right; font-weight: 600;">${format_currency(lineTotal, currency)}</td>
+                  </tr>
+                `;
+              }).join('');
+
+              const totalAmount = flt(data.total);
 
               const previewHtml = `
-                <div style="background: var(--card-bg, #fff); border: 1px solid var(--border-color, #cbd5e1); border-radius: 8px; padding: 14px; margin-top: 6px;">
-                  <h5 style="margin-top: 0; margin-bottom: 8px; font-weight: 600;">📄 ${__('Invoice Preview')} (${file_doc.file_name})</h5>
-                  <div style="display: flex; gap: 20px; font-size: 13px; margin-bottom: 10px;">
-                    <div><b>${__('Supplier')}:</b> ${frappe.utils.escape_html(data.supplier || 'Unknown')}</div>
-                    <div><b>${__('Bill No')}:</b> ${frappe.utils.escape_html(data.bill_no || 'N/A')}</div>
-                    <div><b>${__('Estimated Total')}:</b> ${data.total || 'Calculated on submit'}</div>
+                <div class="chatgpt-invoice-preview-card">
+                  <div class="chatgpt-invoice-header">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span style="font-size: 20px;">📄</span>
+                      <div>
+                        <h5 style="margin: 0; font-size: 14.5px; font-weight: 600;">${__('Invoice Verification & Preview')}</h5>
+                        <div class="text-muted" style="font-size: 11.5px;">${frappe.utils.escape_html(file_doc.file_name)}</div>
+                      </div>
+                    </div>
+                    <span class="chatgpt-status-badge badge-pending">⏳ ${__('Pending Confirmation')}</span>
                   </div>
-                  <table class="table table-bordered table-sm" style="font-size: 12px; margin-bottom: 12px;">
-                    <thead><tr><th>Item</th><th style="text-align: right;">Qty</th><th style="text-align: right;">Rate</th></tr></thead>
-                    <tbody>${itemsRows}</tbody>
-                  </table>
-                  <button class="btn btn-primary btn-sm confirm-draft-btn" data-json="${frappe.utils.escape_html(JSON.stringify(data))}">
-                    ✓ ${__('Confirm & Create Draft Purchase Invoice')}
-                  </button>
+
+                  <div class="chatgpt-invoice-meta-grid">
+                    <div class="meta-item">
+                      <span class="meta-label">${__('Supplier / Vendor')}</span>
+                      <span class="meta-val">${frappe.utils.escape_html(data.supplier || 'Unknown Supplier')}</span>
+                      <div>${supBadge}</div>
+                    </div>
+                    <div class="meta-item">
+                      <span class="meta-label">${__('Bill / Invoice #')}</span>
+                      <span class="meta-val">${frappe.utils.escape_html(data.bill_no || 'N/A')}</span>
+                    </div>
+                    <div class="meta-item">
+                      <span class="meta-label">${__('Estimated Grand Total')}</span>
+                      <span class="meta-val total-highlight">${totalAmount ? format_currency(totalAmount, currency) : 'Calculated on Submit'}</span>
+                    </div>
+                  </div>
+
+                  <div class="chatgpt-invoice-table-box">
+                    <table class="chatgpt-data-table">
+                      <thead>
+                        <tr>
+                          <th style="width: 36px; text-align: center;">#</th>
+                          <th>${__('Item Description')}</th>
+                          <th style="width: 70px; text-align: right;">${__('Qty')}</th>
+                          <th style="width: 105px; text-align: right;">${__('Rate')}</th>
+                          <th style="width: 115px; text-align: right;">${__('Amount')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${itemsRows || `<tr><td colspan="5" class="text-center text-muted">${__('No line items found')}</td></tr>`}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colspan="4" style="text-align: right; font-weight: 600;">${__('Total Amount')}:</td>
+                          <td style="text-align: right; font-weight: 700; color: #10a37f;">${format_currency(totalAmount, currency)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  <div class="chatgpt-invoice-footer">
+                    <button class="chatgpt-btn-confirm-draft" data-json="${frappe.utils.escape_html(JSON.stringify(data))}">
+                      ✓ ${__('Confirm & Create Draft Purchase Invoice')}
+                    </button>
+                    <div class="chatgpt-invoice-notice">
+                      💡 ${__('ERPNext will auto-create missing Supplier & Items with real extracted data — zero hardcoded fallbacks.')}
+                    </div>
+                  </div>
                 </div>
               `;
               appendMessageUI("assistant", previewHtml);
 
               // Wire confirmation action
-              container.find(".confirm-draft-btn").last().on("click", function () {
+              container.find(".chatgpt-btn-confirm-draft").last().on("click", function () {
                 const btn = $(this);
-                btn.prop("disabled", true).text(__("Creating Draft..."));
+                const card = btn.closest(".chatgpt-invoice-preview-card");
+                btn.prop("disabled", true).html(`⏳ ${__('Creating Draft Invoice & Registering Data...')}`);
+                
                 const parsedPayload = JSON.parse(btn.attr("data-json"));
 
                 frappe.call({
@@ -251,14 +341,25 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
                   args: { parsed_data: parsedPayload },
                   callback: function (res) {
                     if (res.message && res.message.status === "draft_created") {
-                      btn.replaceWith(`
-                        <div style="color: #10a37f; font-weight: 600; margin-top: 8px;">
-                          ✓ ${res.message.message} <br>
-                          <a href="${res.message.link}" style="color: #0284c7; text-decoration: underline;">${__('Open Draft')} ${res.message.invoice_name}</a>
+                      card.find(".chatgpt-status-badge.badge-pending")
+                        .removeClass("badge-pending")
+                        .addClass("badge-matched")
+                        .html(`✓ ${__('Draft Created')}`);
+                      
+                      btn.parent().html(`
+                        <div class="chatgpt-draft-success-box">
+                          <div style="font-weight: 600; font-size: 13.5px; color: #10a37f; margin-bottom: 6px;">
+                            ${res.message.message}
+                          </div>
+                          <div style="margin-top: 10px;">
+                            <a href="${res.message.link}" class="chatgpt-btn-open-doc">
+                              📄 ${__('Open Draft Purchase Invoice')} ${res.message.invoice_name} ➔
+                            </a>
+                          </div>
                         </div>
                       `);
                     } else {
-                      btn.prop("disabled", false).text(__("Retry"));
+                      btn.prop("disabled", false).html(`⚠️ ${__('Retry Draft Creation')}`);
                       frappe.msgprint(res.message ? res.message.error : __("Failed to create draft invoice."));
                     }
                   }
@@ -267,8 +368,8 @@ frappe.pages['chatgpt_copilot'].on_page_load = function (wrapper) {
 
             } else if (r.message.status === "warning") {
               appendMessageUI("assistant", `
-                ℹ️ <b>${__('Document Analyzed')}:</b> ${r.message.file_name}<br><br>
-                ${r.message.message}<br>
+                ℹ️ <b>${__('Document Analyzed')}:</b> ${frappe.utils.escape_html(r.message.file_name)}<br><br>
+                ${frappe.utils.escape_html(r.message.message)}<br><br>
                 <i>Tip: Please upload a commercial invoice or bill with line items.</i>
               `);
             }
